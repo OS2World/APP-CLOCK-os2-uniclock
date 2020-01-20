@@ -5,3 +5,6 @@
 *.RES
 *.HLP
 *.!!!
+*.ZIP
+uclock.def
+rel

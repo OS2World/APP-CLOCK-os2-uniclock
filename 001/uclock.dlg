@@ -3,6 +3,8 @@
 #endif
 DLGINCLUDE 1 "ids.h"
 
+CODEPAGE 850
+
 DLGTEMPLATE IDD_ABOUT LOADONCALL MOVEABLE DISCARDABLE
 BEGIN
     DIALOG  "Product Information", IDD_ABOUT, 1, 1, 196, 65, WS_VISIBLE,
@@ -10,11 +12,12 @@ BEGIN
             PRESPARAMS PP_FONTNAMESIZE, "9.WarpSans"
     BEGIN
         ICON            ID_MAINPROGRAM, IDD_CLOCKLIST, 7, 34, 20, 16
-        DEFPUSHBUTTON   "~OK", DID_OK, 38, 2, 40, 12
+        DEFPUSHBUTTON   "OK", DID_OK, 38, 2, 40, 12
         LTEXT           "Universal Clock", -1, 38, 51, 150, 8
-        LTEXT           "version 0.3", -1, 38, 42, 150, 8
+                        PRESPARAMS PP_FONTNAMESIZE, "9.WarpSans Bold"
+        LTEXT           "", IDD_VERSION, 38, 42, 150, 8
         GROUPBOX        "", -1, 38, 39, 150, 4
-        LTEXT           "(C) 2015 Alex Taylor", -1, 38, 27, 150, 8
+        LTEXT           "", IDD_COPYRIGHT, 38, 27, 150, 8
         LTEXT           "Licensed under the GNU General Public License.", -1,
                         38, 18, 150, 8
     END
@@ -44,13 +47,11 @@ BEGIN
         SPINBUTTON      IDD_DESCWIDTH, 117, 106, 30, 12, SPBS_MASTER | SPBS_NUMERICONLY | SPBS_JUSTRIGHT
         LTEXT           "%", -1, 149, 106, 28, 8, DT_VCENTER
         GROUPBOX        "Clock panel arrangement", -1, 4, 3, 176, 95
-        //AUTORADIOBUTTON "Top to bottom", IDD_TOPBOTTOM, 8, 79, 80, 10, WS_TABSTOP
-        //AUTORADIOBUTTON "Bottom to top", IDD_BOTTOMTOP, 8, 69, 80, 10, WS_TABSTOP
         SPINBUTTON      IDD_PERCOLUMN, 9, 80, 30, 10, SPBS_MASTER | SPBS_NUMERICONLY | SPBS_JUSTRIGHT
         LTEXT           "per column (0 = single column only)", -1, 41, 80, 128, 8, DT_VCENTER
         LISTBOX         IDD_CLOCKLIST, 9, 7, 149, 69, LS_NOADJUSTPOS | LS_HORZSCROLL
-        PUSHBUTTON      "#5", IDD_CLOCKUP, 162, 65, 13, 11, BS_MINIICON | NOT WS_VISIBLE
-        PUSHBUTTON      "#6", IDD_CLOCKDOWN, 162, 52, 13, 11, BS_MINIICON  | NOT WS_VISIBLE
+        PUSHBUTTON      "#5", IDD_CLOCKUP, 162, 65, 13, 11, BS_MINIICON
+        PUSHBUTTON      "#6", IDD_CLOCKDOWN, 162, 52, 13, 11, BS_MINIICON
     END
 END
 
@@ -96,41 +97,31 @@ BEGIN
         ENTRYFIELD      "", IDD_CITYLIST, 63, 134, 198, 8, ES_MARGIN |
                         WS_GROUP
                         CTLDATA 8, 128, 0, 0
-        PUSHBUTTON      "...", IDD_CITYMAN, 247, 133, 16, 11, NOT WS_VISIBLE
         LTEXT           "Timezone:", -1, 4, 117, 55, 8, DT_VCENTER
-        ENTRYFIELD      "", IDD_TZDISPLAY, 63, 118, 198, 8, ES_MARGIN
+        ENTRYFIELD      "", IDD_TZDISPLAY, 63, 118, 180, 8, ES_MARGIN
                         CTLDATA 8, 64, 0, 0
+        PUSHBUTTON      "...", IDD_TZSELECT, 247, 117, 16, 10
         LTEXT           "Locale:", -1, 4, 103, 55, 8, DT_VCENTER
         CONTROL         "", IDD_LOCALES, 62, 3, 49, 109, WC_COMBOBOX,
                         CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP |
                         WS_VISIBLE
+        AUTOCHECKBOX    "~Coordinates:", IDD_USECOORDINATES, 139, 103, 67, 8
+        LTEXT           "", IDD_COORDINATES, 205, 103, 58, 8, DT_VCENTER | WS_DISABLED
+                        PRESPARAMS PP_FOREGROUNDCOLORINDEX, SYSCLR_WINDOWTEXT
         GROUPBOX        "Time format", -1, 4, 52, 259, 43
-        LTEXT           "Normal:", -1, 8, 74, 50, 8
-        LTEXT           "Alternate:", -1, 8, 59, 50, 8
+        LTEXT           "Style:", -1, 8, 74, 50, 8
         AUTOCHECKBOX    "No seconds display", IDD_TIMESHORT, 157, 75, 96, 8
-        CONTROL         "", IDD_TIMEFMT, 62, 53, 86, 31, WC_COMBOBOX,
+        CONTROL         "", IDD_TIMEFMT, 62, 45, 86, 39, WC_COMBOBOX,
                         CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP |
                         WS_VISIBLE
         ENTRYFIELD      "", IDD_TIMESTR, 152, 75, 105, 8, ES_MARGIN | NOT
                         WS_VISIBLE
-        AUTOCHECKBOX    "No seconds display", IDD_TIMESHORT2, 157, 60, 96, 8
-        CONTROL         "", IDD_TIMEFMT2, 62, 38, 86, 31, WC_COMBOBOX,
-                        CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP |
-                        WS_VISIBLE
-        ENTRYFIELD      "", IDD_TIMESTR2, 152, 60, 105, 8, ES_MARGIN | NOT
-                        WS_VISIBLE
         GROUPBOX        "Date format", -1, 4, 3, 260, 43
-        LTEXT           "Normal:", -1, 8, 26, 50, 8
-        LTEXT           "Alternate:", -1, 8, 10, 50, 8
-        CONTROL         "", IDD_DATEFMT, 62, 4, 86, 31, WC_COMBOBOX,
+        LTEXT           "Style:", -1, 8, 26, 50, 8
+        CONTROL         "", IDD_DATEFMT, 62, -4, 86, 39, WC_COMBOBOX,
                         CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP |
                         WS_VISIBLE
         ENTRYFIELD      "", IDD_DATESTR, 152, 26, 105, 8, ES_MARGIN | NOT
-                        WS_VISIBLE
-        CONTROL         "", IDD_DATEFMT2, 62, -11, 86, 31, WC_COMBOBOX,
-                        CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP |
-                        WS_VISIBLE
-        ENTRYFIELD      "", IDD_DATESTR2, 152, 11, 105, 8, ES_MARGIN | NOT
                         WS_VISIBLE
     END
 END
@@ -182,7 +173,6 @@ BEGIN
     END
 END
 
-CODEPAGE 850
 DLGTEMPLATE IDD_FONTDLG
 BEGIN
     DIALOG  "Font", IDD_FONTDLG, 1, 1, 153, 95, FS_NOBYTEALIGN | FS_MOUSEALIGN, FCF_SYSMENU | FCF_TITLEBAR | FCF_CLOSEBUTTON
@@ -209,3 +199,29 @@ BEGIN
     END
 END
 
+DLGTEMPLATE IDD_TIMEZONE LOADONCALL MOVEABLE DISCARDABLE
+BEGIN
+    DIALOG  "Select Timezone", IDD_TIMEZONE, 1, 1, 191, 106, WS_VISIBLE, FCF_SYSMENU | FCF_TITLEBAR | FCF_CLOSEBUTTON
+    BEGIN
+        LTEXT           "Select by country:", -1, 3, 91, 82, 8, DT_VCENTER
+        CONTROL         "", IDD_TZCOUNTRY, 87, 30, 100, 70, WC_COMBOBOX, CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP | WS_VISIBLE
+        LTEXT           "Zone:", -1, 3, 77, 82, 8, DT_VCENTER
+        CONTROL         "", IDD_TZNAME, 87, 17, 100, 70, WC_COMBOBOX, CBS_DROPDOWNLIST | WS_GROUP | WS_TABSTOP | WS_VISIBLE
+        LTEXT           "Coordinates:", -1, 3, 63, 82, 8, DT_VCENTER
+        LTEXT           "Latitude:", -1, 13, 53, 62, 8, DT_VCENTER
+        LTEXT           " ø", -1, 130, 43, 6, 8, DT_VCENTER
+        LTEXT           " '", -1, 182, 43, 6, 8, DT_VCENTER
+        SPINBUTTON      IDD_TZLAT_DEGS, 87, 53, 42, 12, WS_GROUP | SPBS_MASTER | SPBS_NUMERICONLY
+        SPINBUTTON      IDD_TZLAT_MINS, 139, 53, 42, 12, WS_GROUP | SPBS_MASTER | SPBS_NUMERICONLY
+        LTEXT           "Longitude:", -1, 13, 43, 62, 8, DT_VCENTER
+        LTEXT           " ø", -1, 130, 53, 6, 8, DT_VCENTER
+        LTEXT           " '", -1, 182, 53, 6, 8, DT_VCENTER
+        SPINBUTTON      IDD_TZLONG_DEGS, 87, 43, 42, 12, WS_GROUP | SPBS_MASTER | SPBS_NUMERICONLY
+        SPINBUTTON      IDD_TZLONG_MINS, 139, 43, 42, 12, WS_GROUP | SPBS_MASTER | SPBS_NUMERICONLY
+        LTEXT           "TZ value:", -1, 3, 31, 67, 8, DT_BOTTOM
+        ENTRYFIELD      "", IDD_TZVALUE, 5, 20, 180, 8, ES_MARGIN
+                        CTLDATA 8, 64, 0, 0
+        DEFPUSHBUTTON   "OK", DID_OK, 3, 2, 40, 12
+        PUSHBUTTON      "Cancel", DID_CANCEL, 45, 2, 40, 12
+    END
+END

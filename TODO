@@ -1,0 +1,13 @@
+TODOs: Universal Clock & WTDPanel
+---------------------------------
+
+For v1.0:
+- Time conversion utility.
+- Make help file name NLS-aware.
+
+TBD:
+- Alarm.
+- XCenter widget.
+- Cairo support.
+- Program settings: default settings for new clocks (format, appearance).
+- Program settings: separator line style (solid, dotted, none).

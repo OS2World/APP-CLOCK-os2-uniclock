@@ -10,6 +10,8 @@
 
 #define ICON_UP                     5
 #define ICON_DOWN                   6
+#define ICON_DAY                    7
+#define ICON_NIGHT                  8
 
 // Menu resource IDs
 
@@ -22,6 +24,7 @@
 #define IDM_HELP                    90
 #define ID_HELP                     91
 #define ID_HELP_CONTENTS            92
+#define ID_HELP_KEYS                93
 #define ID_ABOUT                    99
 
 
@@ -36,20 +39,22 @@
 #define IDD_CFGCOMMON               200
 #define IDD_TITLEBAR                201
 #define IDD_BORDERS                 202
-#define IDD_VIEWSWITCH              205
-#define IDD_DESCWIDTH               206
+#define IDD_CYCLE_DATE              203
+#define IDD_CYCLE_SUN               204
+#define IDD_CYCLE_WEATHER           205
+#define IDD_VIEWSWITCH              206
+#define IDD_DESCWIDTH               207
 #define IDD_CLOCKLIST               210
 #define IDD_CLOCKUP                 211
 #define IDD_CLOCKDOWN               212
-#define IDD_TOPBOTTOM               213
-#define IDD_BOTTOMTOP               214
 #define IDD_PERCOLUMN               215
 
 #define IDD_CFGCLOCKS               300
 #define IDD_CLOCKADD                302
 #define IDD_CLOCKDEL                303
+#define IDD_COORDINATES             305
 #define IDD_CITYLIST                306
-#define IDD_CITYMAN                 307
+#define IDD_TZSELECT                307
 #define IDD_TZDISPLAY               308
 #define IDD_LOCALES                 309
 #define IDD_DATESTR                 310
@@ -57,11 +62,7 @@
 #define IDD_TIMESHORT               312
 #define IDD_TIMESTR                 314
 #define IDD_DATEFMT                 315
-#define IDD_TIMEFMT2                316
-#define IDD_TIMESTR2                317
-#define IDD_TIMESHORT2              318
-#define IDD_DATEFMT2                319
-#define IDD_DATESTR2                320
+#define IDD_USECOORDINATES          321
 
 #define IDD_CFGPRES                 400
 #define IDD_DISPLAYFONT             401
@@ -87,7 +88,20 @@
 
 #define IDD_FONTDLG                 600
 
+#define IDD_TIMEZONE                700
+#define IDD_TZCOUNTRY               701
+#define IDD_TZNAME                  702
+#define IDD_TZLAT_DEGS              703
+#define IDD_TZLAT_MINS              704
+#define IDD_TZLAT_SECS              705
+#define IDD_TZLONG_DEGS             706
+#define IDD_TZLONG_MINS             707
+#define IDD_TZLONG_SECS             708
+#define IDD_TZVALUE                 710
+
 #define IDD_ABOUT                   900
+#define IDD_VERSION                 901
+#define IDD_COPYRIGHT               902
 
 
 // Base ID for clock panel controls
@@ -98,9 +112,13 @@
 
 #define IDS_HELP_TITLE              10000
 
-#define IDS_BTN_OK                  10001
-#define IDS_BTN_CANCEL              10002
-#define IDS_BTN_HELP                10003
+#define IDS_LANG                    10001
+
+#define IDS_BTN_OK                  10002
+#define IDS_BTN_CANCEL              10003
+#define IDS_BTN_HELP                10004
+#define IDS_ABOUT_VERSION           10005
+#define IDS_ABOUT_COPYRIGHT         10006
 
 #define IDS_LOC_UTC                 10010
 #define IDS_LOC_DEFAULT             10011
@@ -122,11 +140,15 @@
 #define IDS_ERROR_TITLE             10900
 #define IDS_ERROR_CLKDATA           10901
 #define IDS_ERROR_NOTEBOOK          10902
+#define IDS_ERROR_ZONEINFO          10903
+#define IDS_ERROR_CLOCKDATA         10904
+#define IDS_ERROR_CLOCKLOOK         10905
+#define IDS_ERROR_INI_TITLE         10906
 
 
 // Help subtable IDs
 
-#define HSTB_MAIN                   20000
+#define HSTB_CONFIG                 20001
 
 
 

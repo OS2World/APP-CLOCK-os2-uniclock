@@ -1,16 +1,22 @@
 #include <os2.h>
 #include "ids.h"
 
-ICON ID_MAINPROGRAM "program.ico"
-ICON ICON_UP        "up.ico"
-ICON ICON_DOWN      "down.ico"
+ICON ID_MAINPROGRAM "..\\program.ico"
+ICON ICON_UP        "..\\up.ico"
+ICON ICON_DOWN      "..\\down.ico"
+ICON ICON_DAY       "..\\day.ico"
+ICON ICON_NIGHT     "..\\night.ico"
 
+// String resources are max 255 characters unless otherwise noted.
 
 STRINGTABLE
 BEGIN
+    IDS_LANG                            "EN"        // change for each translation (2 letters)
     IDS_BTN_OK                          "OK"
     IDS_BTN_CANCEL                      "Cancel"
     IDS_BTN_HELP                        "Help"
+    IDS_ABOUT_VERSION                   "Version %s"
+    IDS_ABOUT_COPYRIGHT                 "Copyright (C) %s Alex Taylor"
 END
 
 STRINGTABLE
@@ -22,7 +28,7 @@ END
 STRINGTABLE
 BEGIN
     IDS_CFG_PROGRAM                     "Program Configuration"
-    IDS_CFG_CLOCK                       "Clock %d - Properties"
+    IDS_CFG_CLOCK                       "Clock %u - Properties"
     IDS_CFG_COMMONPAGE                  "~Preferences"
     IDS_CFG_CLOCKPAGE                   "~Clock Setup"
     IDS_CFG_STYLEPAGE                   "~Appearance"
@@ -32,6 +38,7 @@ STRINGTABLE
 BEGIN
     IDS_FORMAT_SYSDEF                   "System default"
     IDS_FORMAT_LOCDEF                   "Locale default"
+    IDS_FORMAT_LOCALT                   "Locale alternative"
     IDS_FORMAT_CUSTOM                   "Custom string"
 END
 
@@ -43,9 +50,12 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_ERROR_TITLE                     "Error"
-    IDS_ERROR_CLKDATA                   "Failed to get clock data!"
+    IDS_ERROR_TITLE                     "Error"                     // max. 20
+    IDS_ERROR_CLKDATA                   "Failed to get clock data."
     IDS_ERROR_NOTEBOOK                  "Error populating notebook."
+    IDS_ERROR_ZONEINFO                  "Unable to read timezone database (%s)."
+    IDS_ERROR_CLOCKDATA                 "The clock settings format has changed since your configuration was last saved.\x0d\x0a\x0aIf you select OK, the program will to attempt to migrate your settings; otherwise choose Cancel to exit."
+    IDS_ERROR_INI_TITLE                 "Reset Configuration"       // max. 32
 END
 
 MENU IDM_POPUP
@@ -56,9 +66,10 @@ BEGIN
     MENUITEM "~Add clock...",                       ID_CLOCKADD,        MIS_TEXT
     MENUITEM "~Delete clock",                       ID_CLOCKDEL,        MIS_TEXT
     MENUITEM SEPARATOR
-    SUBMENU "~Help",                                IDM_HELP
+    SUBMENU "~Help",                                IDM_HELP,
     BEGIN
-        MENUITEM "~General help",                   ID_HELP,            MIS_HELP | MIS_TEXT
+        MENUITEM "~General help\tF1",               ID_HELP,            MIS_HELP | MIS_TEXT
+        MENUITEM "~Keys help",                      ID_HELP_KEYS,       MIS_TEXT
         MENUITEM SEPARATOR
         MENUITEM "Product information",             ID_ABOUT,           MIS_TEXT
     END
@@ -78,12 +89,18 @@ END
 
 HELPTABLE ID_MAINPROGRAM
 BEGIN
-    HELPITEM ID_MAINPROGRAM, HSTB_MAIN, 100
+    HELPITEM ID_MAINPROGRAM, 0,             001
+    HELPITEM IDD_CONFIG,     HSTB_CONFIG,   001
+    HELPITEM IDD_TIMEZONE,   0,             153
 END
 
-HELPSUBTABLE HSTB_MAIN
+HELPSUBTABLE HSTB_CONFIG
 BEGIN
+    HELPSUBITEM IDD_CFGCLOCKS,  151
+    HELPSUBITEM IDD_CFGPRES,    152
+    HELPSUBITEM IDD_CFGCOMMON,  160
 END
+
 
 RCINCLUDE "uclock.dlg"
 

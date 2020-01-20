@@ -1,187 +1,49 @@
+/****************************************************************************
+ * uclock.c                                                                 *
+ *                                                                          *
+ * Contains the Universal Clock main program and functions related to the   *
+ * basic application window/logic.                                          *
+ *                                                                          *
+ ****************************************************************************
+ *                                                                          *
+ *  This program is free software; you can redistribute it and/or modify    *
+ *  it under the terms of the GNU General Public License as published by    *
+ *  the Free Software Foundation; either version 2 of the License, or       *
+ *  (at your option) any later version.                                     *
+ *                                                                          *
+ *  This program is distributed in the hope that it will be useful,         *
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of          *
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
+ *  GNU General Public License for more details.                            *
+ *                                                                          *
+ *  You should have received a copy of the GNU General Public License       *
+ *  along with this program; if not, write to the Free Software             *
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA                *
+ *  02111-1307  USA                                                         *
+ *                                                                          *
+ ****************************************************************************/
+#define INCL_DOSERRORS
+#define INCL_DOSMISC
+#define INCL_DOSRESOURCES
+#define INCL_DOSMODULEMGR
+#define INCL_DOSPROCESS
+#define INCL_GPI
+#define INCL_WIN
+#define INCL_WINPOINTERS
+#include <os2.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <uconv.h>
+#include <unidef.h>
+
+#include <PMPRINTF.H>
+
+#include "wtdpanel.h"
 #include "uclock.h"
 #include "ids.h"
 
-// ----------------------------------------------------------------------------
-// CONSTANTS
-
-#define SZ_WINDOWCLASS          "UClockWindow"
-
-#define HELP_FILE               "uclock.hlp"
-#define INI_FILE                "uclock.ini"
-#define ZONE_FILE               "zoneinfo.dat"
-
-// min. size of the program window (not used yet)
-#define US_MIN_WIDTH            100
-#define US_MIN_HEIGHT           60
-
-#define LOCALE_BUF_MAX          4096    // maximum length of a locale list
-
-// used to indicate an undefined colour presentation parameter
-#define NO_COLOUR_PP            0xFF000000
-
-// Maximum string length...
-#define SZRES_MAXZ              256     // ...of a generic string resource
-
-// Used by the colour dialog
-#define CWN_CHANGE              0x601
-#define CWM_SETCOLOUR           0x602
-
-// Maximum number of clock-display windows supported
-#define MAX_CLOCKS              12
-
-// Profile (INI) file entries (these should not exceed 29 characters)
-#define PRF_APP_POSITION        "Position"
-#define PRF_KEY_LEFT            "Left"
-#define PRF_KEY_BOTTOM          "Bottom"
-#define PRF_KEY_WIDTH           "Width"
-#define PRF_KEY_HEIGHT          "Height"
-
-#define PRF_APP_PREFS           "Preferences"
-#define PRF_KEY_FLAGS           "Flags"
-#define PRF_KEY_COMPACTTH       "CompactThreshold"
-#define PRF_KEY_DESCWIDTH       "DescWidth"
-#define PRF_KEY_PERCOLUMN       "PerColumn"
-
-#define PRF_APP_CLOCKDATA       "ClockData"
-#define PRF_KEY_NUMCLOCKS       "Count"
-#define PRF_KEY_PANEL           "WTDPanel"   // append ##
-#define PRF_KEY_PRESPARAM       "WTDLook"    // append ##
-
-// App-level style settings
-#define APP_STYLE_TITLEBAR      0x1         // show titlebar
-#define APP_STYLE_WTBORDERS     0x10        // show clock borders
-
-PFNWP pfnRecProc;
-
-
-// ----------------------------------------------------------------------------
-// MACROS
-
-// Get separate RGB values from a long
-#define RGBVAL_RED(l)           ((BYTE)((l >> 16) & 0xFF))
-#define RGBVAL_GREEN(l)         ((BYTE)((l >>  8) & 0xFF))
-#define RGBVAL_BLUE(l)          ((BYTE)(l & 0xFF))
-
-// Combine separate RGB values into a long
-#define RGB2LONG(r,g,b)         ((LONG)((r << 16) | (g << 8) | b ))
-
-// ----------------------------------------------------------------------------
-// TYPEDEFS
-
-// Used by the PM colour-wheel control (on the colour-selection dialog)
-typedef struct CWPARAM {
-    USHORT  cb;
-    RGB     rgb;
-    BOOL    fCancel;
-} CWPARAM;
-
-typedef struct CWDATA {
-    USHORT  updatectl;
-    HWND    hwndCol;
-    HWND    hwndSpinR;
-    HWND    hwndSpinG;
-    HWND    hwndSpinB;
-    RGB     *rgb;
-    RGB     rgbold;
-    BOOL    *pfCancel;
-} CWDATA;
-
-
-// Used to group a single clock's presentation parameters together
-typedef struct _Clock_PresParams {
-    CHAR  szFont[ FACESIZE ];           // font
-    ULONG clrBG,                        // background colour
-          clrFG,                        // foreground (text) colour
-          clrBor,                       // border colour
-          clrSep;                       // separator line colour
-} CLKSTYLE, *PCLKSTYLE;
-
-
-// Used to pass data in the configuration dialog
-typedef struct _Config_Data {
-    HAB         hab;                        // anchor-block handle
-    HMQ         hmq;                        // main message queue
-    USHORT      usClocks;                   // number of clocks
-    WTDCDATA    aClockData[ MAX_CLOCKS ];   // array of clock data
-    CLKSTYLE    aClockStyle[ MAX_CLOCKS ];  // array of clock styles
-    ULONG       ulPage1;                    // page ID
-    USHORT      fsStyle;                    // global style flags
-    USHORT      usCompactThreshold;         // when to auto-switch to compact view
-    USHORT      usPerColumn;                // no. of clocks to show per column
-    BYTE        bDescWidth;                 // % width of descriptions in compact view
-    BOOL        bChanged;                   // was the configuration changed?
-    UconvObject uconv;                      // Unicode text conversion object
-} UCFGDATA, *PUCFGDATA;
-
-
-// Used to pass data in the clock properties dialog
-typedef struct _Clock_Properties {
-    HAB         hab;                        // anchor-block handle
-    HMQ         hmq;                        // main message queue
-    USHORT      usClock;                    // current clock number
-    WTDCDATA    clockData;                  // clock's data
-    CLKSTYLE    clockStyle;                 // clock's fonts & colours
-    ULONG       ulPage1,                    // page ID of clock setup page
-                ulPage2;                    // page ID of clock style page
-    BOOL        bChanged;                   // was the configuration changed?
-    UconvObject uconv;                      // Unicode text conversion object
-} UCLKPROP, *PUCLKPROP;
-
-
-// Contains global application data
-typedef struct _Global_Data {
-    HAB     hab;                        // anchor-block handle
-    HMQ     hmq;                        // main message queue
-    HINI    hIni;                       // program INI file
-    HWND    clocks[ MAX_CLOCKS ];       // array of clock-display controls
-    HWND    hwndTB, hwndSM, hwndMM;     // titlebar and window control handles
-    HWND    hwndPopup;                  // popup menu
-    USHORT  usClocks;                   // number of clocks configured
-    ULONG   timer;                      // refresh timer
-    CHAR    szTZ[ TZSTR_MAXZ ];         // actual system TZ
-    USHORT  usMsgClock;                 // clock which sent the latest message
-    USHORT  fsStyle;                    // global style flags
-    USHORT  usCompactThreshold;         // when to auto-switch to compact view
-    USHORT  usPerColumn;                // no. of clocks to show per column
-    USHORT  usCols;                     // number of columns required
-    BYTE    bDescWidth;                 // % width of descriptions in compact view
-} UCLGLOBAL, *PUCLGLOBAL;
-
-
-// ----------------------------------------------------------------------------
-// FUNCTION PROTOTYPES
-
-MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-void ResizeClocks( HWND hwnd );
-MRESULT PaintClient( HWND hwnd );
-MRESULT EXPENTRY AboutDlgProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-BOOL WindowSetup( HWND hwnd, HWND hwndClient );
-void CentreWindow( HWND hwnd );
-void ToggleTitleBar( PUCLGLOBAL pGlobal, HWND hwndFrame, BOOL fOn );
-void OpenProfile( PUCLGLOBAL pGlobal );
-BOOL LoadIniData( PVOID pData, USHORT cb, HINI hIni, PSZ pszApp, PSZ pszKey );
-void SaveSettings( HWND hwnd );
-void UpdateTime( HWND hwnd );
-BOOL AddNewClock( HWND hwnd );
-void DeleteClock( HWND hwnd, PUCLGLOBAL pGlobal, USHORT usClock );
-void ConfigNotebook( HWND hwnd );
-MRESULT EXPENTRY CfgDialogProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-BOOL CfgPopulateNotebook( HWND hwnd, PUCFGDATA pConfig );
-MRESULT EXPENTRY CfgCommonPageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-MRESULT EXPENTRY CfgClockPageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-MRESULT EXPENTRY CfgPresPageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-void CfgPopulateClockList( HWND hwnd, PUCFGDATA pConfig );
-void CfgSettingsCommon( HWND hwnd, PUCFGDATA pConfig );
-BOOL ClockNotebook( HWND hwnd, USHORT usNumber );
-MRESULT EXPENTRY ClkDialogProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-BOOL ClkPopulateNotebook( HWND hwnd, PUCLKPROP pConfig );
-MRESULT EXPENTRY ClkClockPageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-MRESULT EXPENTRY ClkStylePageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-BOOL ClkSettingsClock( HWND hwnd, PUCLKPROP pConfig );
-BOOL ClkSettingsStyle( HWND hwnd, PUCLKPROP pConfig );
-MRESULT EXPENTRY ClrDlgProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 );
-BOOL SelectFont( HWND hwnd, PSZ pszFace, USHORT cbBuf );
-void SelectColour( HWND hwnd, HWND hwndCtl );
 
 
 /* ------------------------------------------------------------------------- *
@@ -207,12 +69,12 @@ int main( int argc, char *argv[] )
     PSZ       pszEnv;
 
 
+    // Presentation Manager program initialization
     hab = WinInitialize( 0 );
     if ( hab == NULLHANDLE ) {
         sprintf( szError, "WinInitialize() failed.");
         fInitFailure = TRUE;
     }
-
     if ( ! fInitFailure ) {
         hmq = WinCreateMsgQueue( hab, 0 );
         if ( hmq == NULLHANDLE ) {
@@ -221,12 +83,14 @@ int main( int argc, char *argv[] )
         }
     }
 
+    // Register the custom clock panel class
     if (( ! fInitFailure ) &&
         ( ! WinRegisterClass( hab, WT_DISPLAY, WTDisplayProc, CS_SIZEREDRAW, sizeof(PWTDDATA) )))
     {
         sprintf( szError, "Failed to register class %s:\nWinGetLastError() = 0x%X\n", WT_DISPLAY, WinGetLastError(hab) );
         fInitFailure = TRUE;
     }
+    // And the UniClock main window class
     if (( ! fInitFailure ) &&
         ( ! WinRegisterClass( hab, SZ_WINDOWCLASS, MainWndProc, CS_SIZEREDRAW, sizeof(PUCLGLOBAL) )))
     {
@@ -235,8 +99,10 @@ int main( int argc, char *argv[] )
     }
 
     if ( !fInitFailure ) {
+        // Get a handle to WPConfig (for the colour wheel support)
         hlib = WinLoadLibrary( hab, "WPCONFIG.DLL" );
 
+        // Initialize global program data
         memset( &global, 0, sizeof(global) );
         global.hab      = hab;
         global.hmq      = hmq;
@@ -244,9 +110,14 @@ int main( int argc, char *argv[] )
         global.usCompactThreshold = 50;
         global.bDescWidth = 55;
 
+        // Get system environment variables
         pszEnv = getenv("TZ");
-        if (pszEnv) strncpy( global.szTZ, pszEnv, TZSTR_MAXZ );
+        if (pszEnv) strncpy( global.szTZ, pszEnv, TZSTR_MAXZ-1 );
 
+        pszEnv = getenv("LANG");
+        if (pszEnv) strncpy( global.szLoc, pszEnv, ULS_LNAMEMAX );
+
+        // Create the program window
         hwndFrame = WinCreateStdWindow( HWND_DESKTOP, 0L, &flStyle,
                                         SZ_WINDOWCLASS, "UniClock", 0L,
                                         NULLHANDLE, ID_MAINPROGRAM, &hwndClient );
@@ -259,7 +130,12 @@ int main( int argc, char *argv[] )
     if ( fInitFailure ) {
         WinMessageBox( HWND_DESKTOP, HWND_DESKTOP, szError, "Program Initialization Error", 0, MB_CANCEL | MB_ERROR );
     } else {
+        // Basic window setup
+
+        // Save pointer to the global data struct in a window word
         WinSetWindowPtr( hwndClient, 0, &global );
+
+        // Get various handles to the frame controls
         global.hwndTB = WinWindowFromID( hwndFrame, FID_TITLEBAR );
         global.hwndSM = WinWindowFromID( hwndFrame, FID_SYSMENU );
         global.hwndMM = WinWindowFromID( hwndFrame, FID_MINMAX );
@@ -267,7 +143,6 @@ int main( int argc, char *argv[] )
         // Initialize online help
         if ( ! WinLoadString( hab, 0, IDS_HELP_TITLE, SZRES_MAXZ-1, szRes ))
             sprintf( szRes, "Help");
-
         helpInit.cb                       = sizeof( HELPINIT );
         helpInit.pszTutorialName          = NULL;
         helpInit.phtHelpTable             = (PHELPTABLE) MAKELONG( ID_MAINPROGRAM, 0xFFFF );
@@ -278,14 +153,13 @@ int main( int argc, char *argv[] )
         helpInit.idActionBar              = 0;
         helpInit.pszHelpWindowTitle       = szRes;
         helpInit.pszHelpLibraryName       = HELP_FILE;
-
         hwndHelp = WinCreateHelpInstance( hab, &helpInit );
         WinAssociateHelpInstance( hwndHelp, hwndFrame );
 
-        // load the popup menu
+        // Create the popup menu
         global.hwndPopup = WinLoadMenu( HWND_DESKTOP, 0, IDM_POPUP );
 
-        // Open the INI file
+        // Open the INI file, if there is one
         OpenProfile( &global );
 
         // Initialize and display the user interface
@@ -294,8 +168,10 @@ int main( int argc, char *argv[] )
         // Now run the main program message loop
         while ( WinGetMsg( hab, &qmsg, 0, 0, 0 )) WinDispatchMsg( hab, &qmsg );
 
+        // Stop the clock timer
         WinStopTimer( hab, hwndClient, ID_TIMER );
 
+        // Free handle to WPConfig
         WinDeleteLibrary( hab, hlib );
     }
 
@@ -314,35 +190,109 @@ int main( int argc, char *argv[] )
 MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
 {
     PUCLGLOBAL pGlobal;
-    SWP        swp;
-    RECTL      rcl;
-    POINTL     ptl;
-    USHORT     i;
+    POINTL     ptl;                   // Pointer position
+    BOOL       fHandled;              // Was message passed to a child for handling?
+    ULONG      flState;               // Clock panel state flags
+    USHORT     fsFlags,               // WM_CHAR flags
+               usVK,                  // WM_CHAR virtual-key code
+               i;
     CHAR       szRes[ SZRES_MAXZ ],   // buffer for string resources
                szMsg[ SZRES_MAXZ ];   // buffer for popup message
+    HWND       hwndFocus;
 
 
     switch( msg ) {
 
+        // Mouse drag (either button) - move the window
         case WM_BEGINDRAG:
             WinSetFocus( HWND_DESKTOP, hwnd );
             WinSendMsg( WinQueryWindow( hwnd, QW_PARENT ), WM_TRACKFRAME, MPFROMSHORT(TF_MOVE), MPVOID );
             break;
 
 
+#if 0   // (Replaced this with the WTN_BUTTON1CLOCK notification message)
+        // MB1 click on a clock panel - give it focus
+        case WM_BUTTON1CLICK:
+            pGlobal = WinQueryWindowPtr( hwnd, 0 );
+            ptl.x = SHORT1FROMMP( mp1 );
+            ptl.y = SHORT2FROMMP( mp1 );
+
+            // Find out which clock panel generated the click event
+            pGlobal->usMsgClock = 0xFFFF;
+            for ( i = 0; i < pGlobal->usClocks; i++ ) {
+                if ( pGlobal->clocks[i] && WinQueryWindowPos( pGlobal->clocks[i], &swp )) {
+                    rcl.xLeft   = swp.x;
+                    rcl.yBottom = swp.y;
+                    rcl.xRight  = rcl.xLeft + swp.cx;
+                    rcl.yTop    = rcl.yBottom + swp.cy;
+                    if ( WinPtInRect( pGlobal->hab, &rcl, &ptl )) {
+                        pGlobal->usMsgClock = i;
+                        break;
+                    }
+                }
+            }
+
+            // Give the focus to that clock
+            if ( pGlobal->usMsgClock < pGlobal->usClocks )
+                WinSetFocus( HWND_DESKTOP, pGlobal->clocks[ pGlobal->usMsgClock ] );
+            return (MRESULT) TRUE;
+#endif
+
+        // Key press which wasn't handled by a clock panel (i.e. tab or shift-tab)
+        case WM_CHAR:
+            pGlobal = WinQueryWindowPtr( hwnd, 0 );
+            fsFlags = SHORT1FROMMP( mp1 );
+            if ( fsFlags & KC_KEYUP ) break;    // don't process key-up events
+
+            // we are only interested in virtual keys
+            if (( fsFlags & KC_VIRTUALKEY ) != KC_VIRTUALKEY ) break;
+
+            if ( !pGlobal->usClocks ) break;
+
+            usVK = SHORT2FROMMP( mp2 );
+
+            // get the current focus window
+            hwndFocus = WinQueryFocus( HWND_DESKTOP );
+            for ( i = 0; i < pGlobal->usClocks; i++ ) {
+                if ( hwndFocus == pGlobal->clocks[i] ) break;
+            }
+
+            if ( usVK == VK_BACKTAB ) {
+                // Shift+Tab: switch focus to previous (higher numbered) clock
+                i++;
+                if (( hwndFocus == NULLHANDLE ) || ( i >= pGlobal->usClocks ))
+                    i = 0;
+            }
+            else if ( usVK == VK_TAB ) {
+                // Tab: switch focus to next (lower numbered) clock
+                if (( hwndFocus == NULLHANDLE ) || ( i < 1 ))
+                    i = pGlobal->usClocks - 1;
+                else
+                    i--;
+            }
+            else break;
+
+            if ( pGlobal->clocks[ i ] )
+                WinSetFocus( HWND_DESKTOP, pGlobal->clocks[ i ] );
+            break;
+
+
+        // Do nothing here (initial setup is called from main after this returns)
         case WM_CREATE:
             return (MRESULT) FALSE;
 
 
+        // Menu commands
         case WM_COMMAND:
             switch( SHORT1FROMMP( mp1 )) {
 
-                case ID_CONFIG:
+                case ID_CONFIG:                 // Program settings
                     ConfigNotebook( hwnd );
-                    //WinPostMsg( hwnd, WM_SAVEAPPLICATION, 0, 0 );
+                    // We don't use this (it caused problems)
+                    //  WinPostMsg( hwnd, WM_SAVEAPPLICATION, 0, 0 );
                     break;
 
-                case ID_CLOCKCFG:
+                case ID_CLOCKCFG:               // Clock properties
                     pGlobal = WinQueryWindowPtr( hwnd, 0 );
                     if ( pGlobal->usMsgClock < pGlobal->usClocks ) {
                         ClockNotebook( hwnd, pGlobal->usMsgClock );
@@ -351,7 +301,7 @@ MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
                     }
                     break;
 
-                case ID_CLOCKADD:
+                case ID_CLOCKADD:               // Add clock
                     pGlobal = WinQueryWindowPtr( hwnd, 0 );
                     if (pGlobal->usClocks < MAX_CLOCKS)
                     {
@@ -362,7 +312,7 @@ MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
 
                     break;
 
-                case ID_CLOCKDEL:
+                case ID_CLOCKDEL:               // Delete clock
                     pGlobal = WinQueryWindowPtr( hwnd, 0 );
                     if ( pGlobal->usMsgClock < pGlobal->usClocks ) {
                         if ( ! WinLoadString( pGlobal->hab, NULLHANDLE, IDS_PROMPT_DELETE, SZRES_MAXZ-1, szRes ))
@@ -380,6 +330,10 @@ MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
                     }
                     break;
 
+                case ID_HELP_KEYS:
+                    WinSendMsg( WinQueryHelpInstance( hwnd ), HM_KEYS_HELP, NULL, NULL );
+                    break;
+
                 case ID_ABOUT:                  // Product information dialog
                     WinDlgBox( HWND_DESKTOP, hwnd, (PFNWP) AboutDlgProc, 0, IDD_ABOUT, NULL );
                     break;
@@ -394,34 +348,46 @@ MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
             return (MRESULT) 0;
 
 
+        // Context menu event that was not generated by a clock panel (this
+        // seems to happen when Shift+F10 is pressed)
         case WM_CONTEXTMENU:
             pGlobal = WinQueryWindowPtr( hwnd, 0 );
             ptl.x = SHORT1FROMMP( mp1 );
             ptl.y = SHORT2FROMMP( mp1 );
 
-            // We need to remember which clock panel generated the popup event
-            pGlobal->usMsgClock = 0xFFFF;
+            /* Find out which panel is selected/focused and pass the event down
+             * to it.  (Using WinQueryFocus doesn't seem to work here - does
+             * Shift+F10 automatically unfocus children somehow?)
+             */
+            fHandled = FALSE;
             for ( i = 0; i < pGlobal->usClocks; i++ ) {
-                if ( pGlobal->clocks[i] && WinQueryWindowPos( pGlobal->clocks[i], &swp )) {
-                    rcl.xLeft   = swp.x;
-                    rcl.yBottom = swp.y;
-                    rcl.xRight  = rcl.xLeft + swp.cx;
-                    rcl.yTop    = rcl.yBottom + swp.cy;
-                    if ( WinPtInRect( pGlobal->hab, &rcl, &ptl )) {
-                        pGlobal->usMsgClock = i;
-                        break;
-                    }
+                flState = (ULONG) WinSendMsg( pGlobal->clocks[i], WTD_QUERYSTATE, 0, 0 );
+                if ( flState & WTS_GUI_HILITE ) {
+                    _PmpfF(("Passing context menu event to clock #%u", pGlobal->usMsgClock ));
+                    WinPostMsg( pGlobal->clocks[i], WM_CONTEXTMENU, MPFROM2SHORT( 1, 1 ), mp2 );
+                    fHandled = TRUE;
+                    break;
                 }
             }
+            if ( !fHandled ) {
+                // No clock panel selected, so handle the menu ourselves
+                _PmpfF(("Processing program-level context menu event"));
 
-            // Now show the popup menu
-            WinMapWindowPoints( hwnd, HWND_DESKTOP, &ptl, 1 );
-            WinPopupMenu( HWND_DESKTOP, hwnd, pGlobal->hwndPopup, ptl.x, ptl.y, 0,
-                          PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 );
+                // Disable the clock-specific properties item
+                WinSendMsg( pGlobal->hwndPopup, MM_SETITEMATTR,
+                            MPFROM2SHORT( ID_CLOCKCFG, TRUE ),
+                            MPFROM2SHORT( MIA_DISABLED, MIA_DISABLED ));
+
+                pGlobal->usMsgClock = 0xFFFF;
+                WinMapWindowPoints( hwnd, HWND_DESKTOP, &ptl, 1 );
+                WinPopupMenu( HWND_DESKTOP, hwnd, pGlobal->hwndPopup, ptl.x, ptl.y, 0,
+                              PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 );
+            }
             break;
 
 
         case WM_CONTROL:
+            // Not used at present
             switch( SHORT1FROMMP( mp1 )) {
             } // end WM_CONTROL messages
             break;
@@ -446,7 +412,37 @@ MRESULT EXPENTRY MainWndProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
             }
             break;
 
+        case WTN_BUTTON1CLICK:
+            hwndFocus = (HWND) mp2;
+            _PmpfF(("Processing MB1 click notification from clock %X", mp2 ));
+            WinSetFocus( HWND_DESKTOP, hwndFocus );
+            break;
+
+        case WTN_CONTEXTMENU:
+            pGlobal = WinQueryWindowPtr( hwnd, 0 );
+            ptl.x = SHORT1FROMMP( mp1 );
+            ptl.y = SHORT2FROMMP( mp1 );
+            hwndFocus = (HWND) mp2;
+            for ( i = 0; i < pGlobal->usClocks; i++ ) {
+                if ( hwndFocus == pGlobal->clocks[i] ) break;
+            }
+            pGlobal->usMsgClock = i;
+            _PmpfF(("Processing context menu notification from clock #%u", i ));
+
+            // Show the popup menu
+            WinMapWindowPoints( hwnd, HWND_DESKTOP, &ptl, 1 );
+            WinSendMsg( pGlobal->hwndPopup, MM_SETITEMATTR,
+                        MPFROM2SHORT( ID_CLOCKCFG, TRUE ),
+                        MPFROM2SHORT( MIA_DISABLED, 0 ));
+            WinPopupMenu( HWND_DESKTOP, hwnd, pGlobal->hwndPopup, ptl.x, ptl.y, 0,
+                          PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 );
+            break;
+
+        case HM_QUERY_KEYS_HELP:
+            return (MRESULT) 200;
+
         case WM_SAVEAPPLICATION:
+            // This causes some kind of race condition, so we don't call it now
             // Save the current settings to the INI file
             SaveSettings( hwnd );
             break;
@@ -486,6 +482,7 @@ BOOL WindowSetup( HWND hwnd, HWND hwndClient )
     UniChar     uzRes[ SZRES_MAXZ ];   // buffer converted UCS-2 strings
     CHAR        szPrfKey[ 32 ],        // INI key name
                 szRes[ SZRES_MAXZ ],   // buffer for string resources
+                szRes2[ 32 ],          // ditto
                 szFont[ FACESIZE+4 ];  // current font pres.param
     HPOINTER    hicon;                 // main application icon
     LONG        x  = 0,                // window position values (from INI)
@@ -513,6 +510,9 @@ BOOL WindowSetup( HWND hwnd, HWND hwndClient )
     if ( LoadIniData( &usVal, sizeof(USHORT), pGlobal->hIni, PRF_APP_PREFS, PRF_KEY_PERCOLUMN ))
         pGlobal->usPerColumn = usVal;
 
+    pGlobal->hptrDay = WinLoadPointer( HWND_DESKTOP, 0L, ICON_DAY );
+    pGlobal->hptrNight = WinLoadPointer( HWND_DESKTOP, 0L, ICON_NIGHT );
+
     LoadIniData( &(pGlobal->usClocks), sizeof(USHORT), pGlobal->hIni, PRF_APP_CLOCKDATA, PRF_KEY_NUMCLOCKS );
     if (pGlobal->usClocks > MAX_CLOCKS)
         pGlobal->usClocks = MAX_CLOCKS;
@@ -531,7 +531,9 @@ BOOL WindowSetup( HWND hwnd, HWND hwndClient )
         pGlobal->clocks[0] = WinCreateWindow( hwndClient, WT_DISPLAY, "", 0L,
                                               0, 0, 0, 0, hwndClient, HWND_TOP, FIRST_CLOCK, NULL, NULL );
         WinSendMsg( pGlobal->clocks[0], WTD_SETTIMEZONE, MPFROMP("UTC0"), MPFROMP(uzRes));
-        WinSendMsg( pGlobal->clocks[0], WTD_SETOPTIONS,  MPFROMLONG( WTF_BORDER_FULL ), MPVOID );
+        WinSendMsg( pGlobal->clocks[0], WTD_SETLOCALE, MPFROMP("univ"), MPVOID );
+        WinSendMsg( pGlobal->clocks[0], WTD_SETOPTIONS, MPFROMLONG( WTF_BORDER_FULL ), MPVOID );
+//        WinSendMsg( pGlobal->clocks[0], WTD_SETINDICATORS, MPFROMP( pGlobal->hptrDay ), MPFROMP( pGlobal->hptrNight ));
         WinSetPresParam( pGlobal->clocks[0], PP_SEPARATORCOLOR, sizeof(ULONG), &clrS );
         WinSetPresParam( pGlobal->clocks[0], PP_BORDERCOLOR, sizeof(ULONG), &clrB );
         WinSetPresParam( pGlobal->clocks[0], PP_FONTNAMESIZE, 11, "9.WarpSans");
@@ -544,71 +546,61 @@ BOOL WindowSetup( HWND hwnd, HWND hwndClient )
         pGlobal->clocks[1] = WinCreateWindow( hwndClient, WT_DISPLAY, "", 0L,
                                               0, 0, 0, 0, hwndClient, HWND_TOP, FIRST_CLOCK+1, NULL, NULL );
         WinSendMsg( pGlobal->clocks[1], WTD_SETTIMEZONE, MPFROMP(pGlobal->szTZ), MPFROMP(uzRes));
-        WinSendMsg( pGlobal->clocks[1], WTD_SETOPTIONS,  MPFROMLONG( WTF_BORDER_FULL & ~WTF_BORDER_BOTTOM ), MPVOID );
+        WinSendMsg( pGlobal->clocks[1], WTD_SETLOCALE, MPFROMP(pGlobal->szLoc), MPVOID );
+        WinSendMsg( pGlobal->clocks[1], WTD_SETOPTIONS, MPFROMLONG( WTF_BORDER_FULL & ~WTF_BORDER_BOTTOM ), MPVOID );
+//        WinSendMsg( pGlobal->clocks[1], WTD_SETINDICATORS, MPFROMP( pGlobal->hptrDay ), MPFROMP( pGlobal->hptrNight ));
         WinSetPresParam( pGlobal->clocks[1], PP_SEPARATORCOLOR, sizeof(ULONG), &clrS );
         WinSetPresParam( pGlobal->clocks[1], PP_BORDERCOLOR, sizeof(ULONG), &clrB );
         WinSetPresParam( pGlobal->clocks[1], PP_FONTNAMESIZE, 11, "9.WarpSans");
-
-/*
-        // for testing -----
-        pGlobal->usClocks = 3;
-        wtInit.cb = sizeof( WTDCDATA );
-        wtInit.flOptions = WTF_DATE_CUSTOM;
-        sprintf( wtInit.szTZ, "JST-9");
-        sprintf( wtInit.szLocale, "ja_JP");
-        UniStrcpy( wtInit.uzDesc, L"Japan");
-        UniStrcpy( wtInit.uzDateFmt, L"%Ex (%EC)");
-        pGlobal->clocks[0] = WinCreateWindow( hwndClient, WT_DISPLAY, "", 0L,
-                                            0, 0, 0, 0, hwndClient, HWND_TOP, FIRST_CLOCK, &wtInit, NULL );
-        WinSetPresParam( pGlobal->clocks[0], PP_BORDERCOLOR, sizeof(ULONG), &clrB );
-        WinSetPresParam( pGlobal->clocks[0], PP_SEPARATORCOLOR, sizeof(ULONG), &clrS );
-
-        wtInit.flOptions = WTF_TIME_CUSTOM | WTF_BORDER_TOP | WTF_BORDER_BOTTOM;
-        sprintf( wtInit.szTZ, "GMT0BST,3,-1,0,3600,10,-1,0,7200,3600");
-        sprintf( wtInit.szLocale, "en_CA");
-        UniStrcpy( wtInit.uzDesc, L"United Kingdom");
-        UniStrcpy( wtInit.uzTimeFmt, L"%I:%M %p");
-        pGlobal->clocks[1] = WinCreateWindow( hwndClient, WT_DISPLAY, "", 0L,
-                                            0, 0, 0, 0, hwndClient, HWND_TOP, FIRST_CLOCK+1, &wtInit, NULL );
-        WinSetPresParam( pGlobal->clocks[1], PP_BORDERCOLOR, sizeof(ULONG), &clrB );
-        WinSetPresParam( pGlobal->clocks[1], PP_SEPARATORCOLOR, sizeof(ULONG), &clrS );
-
-        wtInit.flOptions = 0;
-        sprintf( wtInit.szTZ, "EST5EDT,3,2,0,7200,11,1,0,7200,3600");
-        sprintf( wtInit.szLocale, "");
-        UniStrcpy( wtInit.uzDesc, L"Canada (Eastern)");
-        pGlobal->clocks[2] = WinCreateWindow( hwndClient, WT_DISPLAY, "", 0L,
-                                            0, 0, 0, 0, hwndClient, HWND_TOP, FIRST_CLOCK+2, &wtInit, NULL );
-        WinSetPresParam( pGlobal->clocks[2], PP_BORDERCOLOR, sizeof(ULONG), &clrB );
-        WinSetPresParam( pGlobal->clocks[2], PP_SEPARATORCOLOR, sizeof(ULONG), &clrS );
-        // for testing -----
-*/
     }
     else for ( i = 0; i < pGlobal->usClocks; i++ ) {
         // Load each clock's configuration from the INI
-
         sprintf( szPrfKey, "%s%02d", PRF_KEY_PANEL, i );
         fData = LoadIniData( &wtInit, sizeof(wtInit), pGlobal->hIni, PRF_APP_CLOCKDATA, szPrfKey );
         if ( !fData ) {
+            // Saved INI data did not match the structure size!
+            if ( i == 0 ) {
+                // Warn the user about this (but only for the first clock)
+                WinLoadString( pGlobal->hab, NULLHANDLE, IDS_ERROR_INI_TITLE, 31, szRes2 );
+                WinLoadString( pGlobal->hab, NULLHANDLE, IDS_ERROR_CLOCKDATA, SZRES_MAXZ-1, szRes );
+                if ( WinMessageBox( HWND_DESKTOP, hwnd, szRes, szRes2, 0,
+                                    MB_OKCANCEL | MB_WARNING | MB_MOVEABLE ) != MBID_OK )
+                {
+                    WinPostMsg( hwnd, WM_QUIT, 0L, 0L );
+                    return FALSE;
+                }
+            }
             memset( &wtInit, 0, sizeof( wtInit ));
-            if ( ! ( uconv &&
-                   ( WinLoadString( pGlobal->hab, NULLHANDLE, IDS_LOC_DEFAULT, SZRES_MAXZ-1, szRes )) &&
-                   ( UniStrToUcs( uconv, wtInit.uzDesc, szRes, SZRES_MAXZ ) == ULS_SUCCESS )))
-                UniStrcpy( wtInit.uzDesc, L"(Current Location)");
+            // First, attempt a recovery by loading the stub data (up to uzDateFmt)
+            // which should be the same in all program versions...
+            if ( PrfQueryProfileSize( pGlobal->hIni, PRF_APP_CLOCKDATA, szPrfKey, &ulVal ) &&
+                 ( ulVal >= sizeof( WTDCSTUB )))
+            {
+                ulVal = sizeof( WTDCSTUB );
+                PrfQueryProfileData( pGlobal->hIni, PRF_APP_CLOCKDATA, szPrfKey, &wtInit, &ulVal );
+            }
+            else {
+                // Hmm, that failed too. Maybe a corrupt INI file?
+                // We can't do anything except revert to default clock settings.
+                if ( ! ( uconv &&
+                       ( WinLoadString( pGlobal->hab, NULLHANDLE, IDS_LOC_DEFAULT, SZRES_MAXZ-1, szRes )) &&
+                       ( UniStrToUcs( uconv, wtInit.uzDesc, szRes, SZRES_MAXZ ) == ULS_SUCCESS )))
+                    UniStrcpy( wtInit.uzDesc, L"(Current Location)");
+                wtInit.flOptions = WTF_DATE_SYSTEM | WTF_TIME_SYSTEM;
+                sprintf( wtInit.szTZ, pGlobal->szTZ );
+                UniStrcpy( wtInit.uzDateFmt, L"%x");
+                UniStrcpy( wtInit.uzTimeFmt, L"%X");
+            }
+            wtInit.bSep = pGlobal->bDescWidth;
             wtInit.cb = sizeof( WTDCDATA );
-            wtInit.flOptions = WTF_DATE_SYSTEM | WTF_TIME_SYSTEM;
-            sprintf( wtInit.szTZ, pGlobal->szTZ );
-            UniStrcpy( wtInit.uzDateFmt, L"%x");
-            UniStrcpy( wtInit.uzTimeFmt, L"%X");
         }
         sprintf( szPrfKey, "%s%02d", PRF_KEY_PRESPARAM, i );
         fLook = LoadIniData( &savedPP, sizeof(savedPP), pGlobal->hIni, PRF_APP_CLOCKDATA, szPrfKey );
-        wtInit.flOptions |= WTF_BORDER_FULL;
-        if ( i ) wtInit.flOptions &= ~WTF_BORDER_BOTTOM;
         pGlobal->clocks[i] = WinCreateWindow( hwndClient, WT_DISPLAY, "", 0L,
                                               0, 0, 0, 0, hwndClient, HWND_TOP, FIRST_CLOCK+i, &wtInit, NULL );
         if ( ! pGlobal->clocks[i] ) continue;
 
+//        WinSendMsg( pGlobal->clocks[i], WTD_SETINDICATORS, MPFROMP( pGlobal->hptrDay ), MPFROMP( pGlobal->hptrNight ));
         if ( fLook ) {
             if ( savedPP.clrFG != NO_COLOUR_PP )
                 WinSetPresParam( pGlobal->clocks[i], PP_FOREGROUNDCOLOR, sizeof(ULONG), &(savedPP.clrFG) );
@@ -628,6 +620,7 @@ BOOL WindowSetup( HWND hwnd, HWND hwndClient )
     pGlobal->usCols = (pGlobal->usPerColumn && pGlobal->usClocks) ?
                         (USHORT)ceil((float)pGlobal->usClocks / pGlobal->usPerColumn ) :
                         1;
+    UpdateClockBorders( pGlobal );
 
     // Hide the titlebar if appropriate
     ToggleTitleBar( pGlobal, WinQueryWindow( hwnd, QW_PARENT ), FALSE );
@@ -675,7 +668,6 @@ void ResizeClocks( HWND hwnd )
     USHORT     i, ccount;
     ULONG      flOpts;
     LONG       x, y, cx, cy;
-    //LONG       cy2;
 
     pGlobal = WinQueryWindowPtr( hwnd, 0 );
     if (pGlobal && pGlobal->usClocks)
@@ -686,8 +678,6 @@ void ResizeClocks( HWND hwnd )
         y  = rcl.yBottom;
         cx = rcl.xRight / pGlobal->usCols;
         cy = (rcl.yTop - y) / (pGlobal->usPerColumn? pGlobal->usPerColumn: pGlobal->usClocks);
-        //cy2 = (rcl.yTop - y) / pGlobal->usClocks;
-        //cy = cy2 + ((rcl.yTop - y) % pGlobal->usClocks);
 
         ccount = 0;
         for ( i = 0; i < pGlobal->usClocks; i++ ) {
@@ -700,7 +690,6 @@ void ResizeClocks( HWND hwnd )
                 flOpts &= ~WTF_MODE_COMPACT;
             WinSendMsg( pGlobal->clocks[i], WTD_SETOPTIONS, MPFROMLONG(flOpts), MPVOID );
             WinSetWindowPos( pGlobal->clocks[i], HWND_TOP, x, y, cx, cy, SWP_SIZE | SWP_MOVE | SWP_SHOW );
-            //cy = cy2;
             if ( pGlobal->usPerColumn && ( ccount >= pGlobal->usPerColumn )) {
                 ccount = 0;
                 x += cx;
@@ -709,6 +698,38 @@ void ResizeClocks( HWND hwnd )
             else
                 y += cy;
         }
+    }
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * UpdateClockBorders                                                        *
+ *                                                                           *
+ * ------------------------------------------------------------------------- */
+void UpdateClockBorders( PUCLGLOBAL pGlobal )
+{
+    LONG   flOpts;      // Clock panel options mask
+    USHORT i,           // Loop/index counter
+           cpos,        // Position of current clock in column (0 = bottom)
+           cnum;        // Current column number (0 = leftmost)
+
+    for ( i = 0, cpos = 0, cnum = 0; i < pGlobal->usClocks; i++, cpos++ ) {
+        if ( !pGlobal->clocks[i] ) break;
+        flOpts = (ULONG) WinSendMsg( pGlobal->clocks[i], WTD_QUERYOPTIONS, 0, 0 );
+        flOpts |= WTF_BORDER_FULL;
+
+        /* Turn off the bottom border for all but the bottom-most clock in each
+         * column, and the left border for all but the first column.
+         */
+        if ( pGlobal->usPerColumn && ( cpos >= pGlobal->usPerColumn )) {
+            cpos = 0;
+            cnum++;
+        }
+        if ( cpos )
+            flOpts &= ~WTF_BORDER_BOTTOM;
+        if ( cnum )
+            flOpts &= ~WTF_BORDER_LEFT;
+        WinSendMsg( pGlobal->clocks[i], WTD_SETOPTIONS, MPFROMLONG(flOpts), 0 );
     }
 }
 
@@ -777,6 +798,72 @@ void CentreWindow( HWND hwnd )
         WinSetWindowPos( hwnd, HWND_TOP, x, y, wp.cx, wp.cy, SWP_SHOW | SWP_MOVE | SWP_ACTIVATE );
     }
 
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * MoveListItem                                                              *
+ *                                                                           *
+ * Move a list item up or down (by one) within a listbox control. This       *
+ * function does not perform any bounds check; the caller must do that.      *
+ *                                                                           *
+ * ARGUMENTS:                                                                *
+ *   HWND  hwndList: Handle of the listbox control.                          *
+ *   SHORT sItem   : Index of the list item to move.                         *
+ *   BOOL  fMoveUp : If TRUE, item will be moved up by one position;         *
+ *                   if FALSE, item will be moved down by one position.      *
+ *                                                                           *
+ * RETURNS: SHORT                                                            *
+ *   The new item index (return code from LM_INSERTITEM).                    *
+ * ------------------------------------------------------------------------- */
+SHORT MoveListItem( HWND hwndList, SHORT sItem, BOOL fMoveUp )
+{
+    UCHAR szDesc[ LOCDESC_MAXZ ];
+    ULONG ul;
+
+    WinSendMsg( hwndList, LM_QUERYITEMTEXT,
+                MPFROM2SHORT( sItem, LOCDESC_MAXZ-1 ), MPFROMP(szDesc) );
+    ul = (ULONG) WinSendMsg( hwndList, LM_QUERYITEMHANDLE,
+                             MPFROMSHORT(sItem), 0 );
+    WinEnableWindowUpdate( hwndList, FALSE );
+    WinSendMsg( hwndList, LM_DELETEITEM, MPFROMSHORT(sItem), 0 );
+    if ( fMoveUp )
+        sItem--;
+    else
+        sItem++;
+    sItem = (SHORT) WinSendMsg( hwndList, LM_INSERTITEM,
+                                MPFROMSHORT(sItem), MPFROMP(szDesc) );
+    WinSendMsg( hwndList, LM_SETITEMHANDLE,
+                MPFROMSHORT(sItem), MPFROMLONG((LONG)ul) );
+    WinShowWindow( hwndList, TRUE );
+    return ( sItem );
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * ErrorMessage                                                              *
+ *                                                                           *
+ * ARGUMENTS:                                                                *
+ *   HWND   hwnd: Handle of the message-box owner.                           *
+ *   USHORT usID: Resource ID of the error string to display.                *
+ *                                                                           *
+ * RETURNS: N/A                                                              *
+ * ------------------------------------------------------------------------- */
+void ErrorMessage( HWND hwnd, USHORT usID )
+{
+    HAB  hab;
+    CHAR szRes1[ SZRES_MAXZ ],
+         szRes2[ 20 ];  // just need enough for the "Error" string in any language
+
+    if ( hwnd == NULLHANDLE )
+        hwnd = HWND_DESKTOP;
+
+    hab = WinQueryAnchorBlock( hwnd );
+    if ( !WinLoadString( hab, NULLHANDLE, usID, sizeof( szRes1 ) - 1, szRes1 ))
+        sprintf( szRes1, "Error %d\n(Failed to load string resource)", usID );
+    if ( !WinLoadString( hab, NULLHANDLE, IDS_ERROR_TITLE, sizeof( szRes2 ) - 1, szRes2 ))
+        strcpy( szRes2, "Error");
+    WinMessageBox( HWND_DESKTOP, hwnd, szRes1, szRes2, 0, MB_OK | MB_ERROR );
 }
 
 
@@ -967,7 +1054,7 @@ void SaveSettings( HWND hwnd )
             sprintf( szPrfKey, "%s%02d", PRF_KEY_PANEL, i );
             PrfWriteProfileData( pGlobal->hIni, PRF_APP_CLOCKDATA, szPrfKey, &(wtdconfig), sizeof(wtdconfig) );
         } else {
-            ErrorPopup("Failed to get clock data.");    //TODO NLS
+            ErrorMessage( hwnd, IDS_ERROR_CLKDATA );
         }
 
     }
@@ -1019,34 +1106,38 @@ BOOL AddNewClock( HWND hwnd )
            ( UniStrToUcs( uconv, uzRes, szRes, SZRES_MAXZ ) == ULS_SUCCESS )))
         UniStrcpy( uzRes, L"UTC");
 
-    // only clock 0 should have a bottom border
+    flOptions = 0;
+/*  UpdateClockBorders() should take care of this now
+    // only bottom-row clocks should have a bottom border
     flOptions = WTF_BORDER_FULL;
     if ( usNew ) flOptions &= ~WTF_BORDER_BOTTOM;
+*/
+
+//    WinSendMsg( hwndClock, WTD_SETINDICATORS, MPFROMP(pGlobal->hptrDay), MPFROMP(pGlobal->hptrNight));
 
     // set default properties
     WinSendMsg( hwndClock, WTD_SETTIMEZONE, MPFROMP(pGlobal->szTZ), MPFROMP(uzRes));
-    WinSendMsg( hwndClock, WTD_SETOPTIONS,  MPFROMLONG(flOptions), MPVOID );
+    WinSendMsg( hwndClock, WTD_SETLOCALE, MPFROMP(pGlobal->szLoc), 0L );
+    WinSendMsg( hwndClock, WTD_SETOPTIONS, MPFROMLONG(flOptions), 0L );
+    WinSendMsg( hwndClock, WTD_SETSEPARATOR, MPFROMCHAR(pGlobal->bDescWidth), 0L );
     WinSetPresParam( hwndClock, PP_SEPARATORCOLOR, sizeof(ULONG), &clrS );
     WinSetPresParam( hwndClock, PP_BORDERCOLOR, sizeof(ULONG), &clrB );
     WinSetPresParam( hwndClock, PP_FONTNAMESIZE, 11, "9.WarpSans");
 
-#if 0
-    pGlobal->usClocks++;
-    WinInvalidateRect( hwnd, NULL, TRUE );
-#else
     // now show the properties dialog
     if ( ClockNotebook( hwnd, usNew ) ) {
+        // new clock was accepted, so add it to the GUI
         pGlobal->usClocks++;
         pGlobal->usCols = pGlobal->usPerColumn ?
                             (USHORT)ceil((float)pGlobal->usClocks / pGlobal->usPerColumn ) :
                             1;
+        UpdateClockBorders( pGlobal );
     }
     else {
         // delete the new clock if the user cancelled
         WinDestroyWindow( pGlobal->clocks[usNew] );
         pGlobal->clocks[usNew] = NULLHANDLE;
     }
-#endif
 
     if ( uconv ) UniFreeUconvObject( uconv );
     return TRUE;
@@ -1077,12 +1168,14 @@ void DeleteClock( HWND hwnd, PUCLGLOBAL pGlobal, USHORT usDelete )
                         (USHORT)ceil((float)pGlobal->usClocks / pGlobal->usPerColumn ) :
                         1;
 
+/*
     // The bottom-most clock (clock 0, and only 0) should have a full border.
     // So if we deleted that clock, we change the border on the new clock 0.
     if ( usDelete == 0 )
         WinSendMsg( pGlobal->clocks[0], WTD_SETOPTIONS,
                     MPFROMLONG( WTF_BORDER_FULL ), MPVOID );
-
+*/
+    UpdateClockBorders( pGlobal );
 }
 
 
@@ -1125,9 +1218,26 @@ void UpdateTime( HWND hwnd )
  * ------------------------------------------------------------------------- */
 MRESULT EXPENTRY AboutDlgProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
 {
+    HAB  hab;
+    CHAR szBuffer[ SZRES_MAXZ ],
+         szText[ SZRES_MAXZ ];
+
     switch ( msg ) {
 
         case WM_INITDLG:
+            hab = WinQueryAnchorBlock( hwnd );
+            if ( WinLoadString( hab, 0, IDS_ABOUT_VERSION, SZRES_MAXZ-1, szBuffer ))
+                sprintf( szText, szBuffer, SZ_VERSION );
+            else
+                sprintf( szText, "V%s", SZ_VERSION );
+            WinSetDlgItemText( hwnd, IDD_VERSION, szText );
+
+            if ( WinLoadString( hab, 0, IDS_ABOUT_COPYRIGHT, SZRES_MAXZ-1, szBuffer ))
+                sprintf( szText, szBuffer, SZ_COPYRIGHT );
+            else
+                sprintf( szText, "(C) %s Alex Taylor", SZ_COPYRIGHT );
+            WinSetDlgItemText( hwnd, IDD_COPYRIGHT, szText );
+
             CentreWindow( hwnd );
             break;
 
@@ -1135,1066 +1245,6 @@ MRESULT EXPENTRY AboutDlgProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
     }
 
     return WinDefDlgProc( hwnd, msg, mp1, mp2 );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ConfigNotebook                                                            *
- *                                                                           *
- * Initialize and open the configuration notebook dialog.                    *
- * ------------------------------------------------------------------------- */
-void ConfigNotebook( HWND hwnd )
-{
-    UCFGDATA   config;
-    PUCLGLOBAL pGlobal;
-    PSZ        psz;
-    USHORT     i;
-    ULONG      rc,
-               ulid,
-               clr;
-    UCHAR      szFont[ FACESIZE + 4 ];
-
-
-    pGlobal = WinQueryWindowPtr( hwnd, 0 );
-
-    memset( &config, 0, sizeof(UCFGDATA) );
-    config.hab = pGlobal->hab;
-    config.hmq = pGlobal->hmq;
-    config.usClocks = pGlobal->usClocks;
-    config.fsStyle = pGlobal->fsStyle;
-    config.usCompactThreshold = pGlobal->usCompactThreshold;
-    config.bDescWidth = pGlobal->bDescWidth;
-    config.usPerColumn = pGlobal->usPerColumn;
-
-    rc = UniCreateUconvObject( (UniChar *) L"@map=display,path=no", &(config.uconv) );
-    if ( rc != ULS_SUCCESS) config.uconv = NULL;
-
-    // Query the current settings of each clock
-    for ( i = 0; i < pGlobal->usClocks; i++ ) {
-        if ( ! pGlobal->clocks[i] ) continue;
-
-        // colours & fonts
-        if ( WinQueryPresParam( pGlobal->clocks[i], PP_FOREGROUNDCOLOR,
-                                PP_FOREGROUNDCOLORINDEX, &ulid,
-                                sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-            config.aClockStyle[ i ].clrFG = clr;
-        else
-            config.aClockStyle[ i ].clrFG = NO_COLOUR_PP;
-
-        if ( WinQueryPresParam( pGlobal->clocks[i], PP_BACKGROUNDCOLOR,
-                                PP_BACKGROUNDCOLORINDEX, &ulid,
-                                sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-            config.aClockStyle[ i ].clrBG = clr;
-        else
-            config.aClockStyle[ i ].clrBG = NO_COLOUR_PP;
-
-        if ( WinQueryPresParam( pGlobal->clocks[i], PP_BORDERCOLOR,
-                                0, &ulid, sizeof(clr), &clr, 0 ))
-            config.aClockStyle[ i ].clrBor = clr;
-        else
-            config.aClockStyle[ i ].clrBor = NO_COLOUR_PP;
-
-        if ( WinQueryPresParam( pGlobal->clocks[i], PP_SEPARATORCOLOR,
-                                0, &ulid, sizeof(clr), &clr, QPF_NOINHERIT ))
-            config.aClockStyle[ i ].clrSep = clr;
-        else
-            config.aClockStyle[ i ].clrSep = NO_COLOUR_PP;
-
-        if ( WinQueryPresParam( pGlobal->clocks[i], PP_FONTNAMESIZE, 0,
-                                NULL, sizeof(szFont), szFont, QPF_NOINHERIT ))
-        {
-            psz = strchr( szFont, '.') + 1;
-            strncpy( config.aClockStyle[ i ].szFont, psz, FACESIZE );
-        }
-
-        // configurable settings
-        config.aClockData[ i ].cb = sizeof(WTDCDATA);
-        WinSendMsg( pGlobal->clocks[i], WTD_QUERYCONFIG, MPFROMP(&(config.aClockData[i])), MPVOID );
-    }
-
-    WinDlgBox( HWND_DESKTOP, hwnd, (PFNWP) CfgDialogProc, 0, IDD_CONFIG, &config );
-
-    if ( config.bChanged ) {
-        // Apply changes
-        if (( config.fsStyle & APP_STYLE_TITLEBAR ) && !( pGlobal->fsStyle & APP_STYLE_TITLEBAR ))
-            ToggleTitleBar( pGlobal, WinQueryWindow( hwnd, QW_PARENT ), TRUE );
-        else if ( !( config.fsStyle & APP_STYLE_TITLEBAR ) && ( pGlobal->fsStyle & APP_STYLE_TITLEBAR ))
-            ToggleTitleBar( pGlobal, WinQueryWindow( hwnd, QW_PARENT ), FALSE );
-        pGlobal->fsStyle = config.fsStyle;
-        pGlobal->bDescWidth = config.bDescWidth;
-        pGlobal->usPerColumn = config.usPerColumn;
-        pGlobal->usCols = (pGlobal->usPerColumn && pGlobal->usClocks) ?
-                            (USHORT)ceil((float)pGlobal->usClocks / pGlobal->usPerColumn ) :
-                            1;
-        pGlobal->usCompactThreshold = config.usCompactThreshold;
-        for ( i = 0; i < pGlobal->usClocks; i++ ) {
-            WinSendMsg( pGlobal->clocks[i], WTD_SETSEPARATOR,
-                        MPFROMCHAR(pGlobal->bDescWidth), 0L );
-        }
-        ResizeClocks( hwnd );
-    }
-
-    UniFreeUconvObject( config.uconv );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * CfgDialogProc                                                             *
- *                                                                           *
- * Dialog procedure for the application configuration dialog.                *
- * ------------------------------------------------------------------------- */
-MRESULT EXPENTRY CfgDialogProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
-{
-    PUCFGDATA pConfig;
-    HPOINTER  hicon;
-    HWND      hwndPage;
-
-    switch ( msg ) {
-
-        case WM_INITDLG:
-            hicon = WinLoadPointer( HWND_DESKTOP, 0, ID_MAINPROGRAM );
-            WinSendMsg( hwnd, WM_SETICON, (MPARAM) hicon, MPVOID );
-
-            pConfig = (PUCFGDATA) mp2;
-            WinSetWindowPtr( hwnd, 0, pConfig );
-
-            if ( ! CfgPopulateNotebook( hwnd, pConfig ) ) {
-                ErrorPopup("Error populating notebook.");   // TODO NLS
-                return (MRESULT) TRUE;
-            }
-            CentreWindow( hwnd );
-            return (MRESULT) FALSE;
-
-
-        case WM_COMMAND:
-            pConfig = WinQueryWindowPtr( hwnd, 0 );
-            switch( SHORT1FROMMP( mp1 )) {
-
-                case DID_OK:
-                    hwndPage = (HWND) WinSendDlgItemMsg( hwnd, IDD_CFGBOOK, BKM_QUERYPAGEWINDOWHWND, MPFROMLONG(pConfig->ulPage1), 0 );
-                    if ( hwndPage && hwndPage != BOOKERR_INVALID_PARAMETERS )
-                        CfgSettingsCommon( hwndPage, pConfig );
-                    pConfig->bChanged = TRUE;
-                    break;
-
-                default: break;
-            } // end WM_COMMAND messages
-            break;
-
-
-        case WM_CONTROL:
-            pConfig = WinQueryWindowPtr( hwnd, 0 );
-            switch( SHORT1FROMMP( mp1 )) {
-            } // end WM_CONTROL messages
-            break;
-
-
-        default: break;
-    }
-
-    return WinDefDlgProc( hwnd, msg, mp1, mp2 );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * CfgPopulateNotebook()                                                     *
- *                                                                           *
- * Creates the pages (dialogs) of the configuration notebook.                *
- *                                                                           *
- * ARGUMENTS:                                                                *
- *     HWND hwnd        : HWND of the properties dialog.                     *
- *     PUCFGDATA pConfig: Pointer to common configuration data.              *
- *                                                                           *
- * RETURNS: BOOL                                                             *
- *     FALSE if an error occurred.  TRUE otherwise.                          *
- * ------------------------------------------------------------------------- */
-BOOL CfgPopulateNotebook( HWND hwnd, PUCFGDATA pConfig )
-{
-    ULONG          pageId;
-    HWND           hwndPage,
-                   hwndBook;
-    NOTEBOOKBUTTON bookButtons[ 3 ];
-    USHORT         fsCommon = BKA_AUTOPAGESIZE | BKA_STATUSTEXTON;
-    CHAR           szOK[ SZRES_MAXZ ],
-                   szCancel[ SZRES_MAXZ ],
-                   szHelp[ SZRES_MAXZ ];
-
-
-    hwndBook = WinWindowFromID( hwnd, IDD_CFGBOOK );
-
-    if ( ! WinLoadString( pConfig->hab, 0, IDS_BTN_OK, SZRES_MAXZ-1, szOK ))
-        sprintf( szOK, "OK");
-    if ( ! WinLoadString( pConfig->hab, 0, IDS_BTN_CANCEL, SZRES_MAXZ-1, szCancel ))
-        sprintf( szOK, "Cancel");
-    if ( ! WinLoadString( pConfig->hab, 0, IDS_BTN_HELP, SZRES_MAXZ-1, szHelp ))
-        sprintf( szOK, "~Help");
-
-    // create common buttons
-    bookButtons[0].pszText  = szOK;
-    bookButtons[0].idButton = DID_OK;
-    bookButtons[0].flStyle  = BS_AUTOSIZE | BS_DEFAULT;
-    bookButtons[1].pszText  = szCancel;
-    bookButtons[1].idButton = DID_CANCEL;
-    bookButtons[1].flStyle  = BS_AUTOSIZE;
-    bookButtons[2].pszText  = szHelp;
-    bookButtons[2].idButton = DID_HELP;
-    bookButtons[2].flStyle  = BS_AUTOSIZE | BS_HELP;
-    WinSendMsg( hwndBook, BKM_SETNOTEBOOKBUTTONS, MPFROMLONG( 3 ), MPFROMP( bookButtons ));
-
-    // this should make the notebook tabs usable if the program is run on Warp 3
-    WinSendMsg( hwndBook, BKM_SETDIMENSIONS, MPFROM2SHORT( 75, 22 ), MPFROMSHORT( BKA_MAJORTAB ));
-
-    // add the common settings page
-    hwndPage = WinLoadDlg( hwndBook, hwndBook, (PFNWP) CfgCommonPageProc, 0, IDD_CFGCOMMON, pConfig );
-    pageId = (ULONG) WinSendMsg( hwndBook, BKM_INSERTPAGE, NULL,
-                                 MPFROM2SHORT( fsCommon | BKA_MAJOR, BKA_FIRST ));
-    if ( ! pageId ) return FALSE;
-    if ( ! WinSendMsg( hwndBook, BKM_SETTABTEXT, MPFROMLONG( pageId ), MPFROMP("~Common")))                     // TODO NLS
-        return FALSE;
-    if ( ! WinSendMsg( hwndBook, BKM_SETPAGEWINDOWHWND, MPFROMLONG( pageId ), MPFROMP( hwndPage )))
-        return FALSE;
-    pConfig->ulPage1 = pageId;
-
-    return TRUE;
-}
-
-
-/* ------------------------------------------------------------------------- *
- * CfgCommonPageProc                                                         *
- *                                                                           *
- * Dialog procedure for the common settings page.                            *
- * ------------------------------------------------------------------------- */
-MRESULT EXPENTRY CfgCommonPageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
-{
-    static PUCFGDATA pConfig;
-
-    switch ( msg ) {
-
-        case WM_INITDLG:
-            pConfig = (PUCFGDATA) mp2;
-            if ( !pConfig ) return (MRESULT) TRUE;
-            CfgPopulateClockList( hwnd, pConfig );
-
-            if ( pConfig->fsStyle & APP_STYLE_TITLEBAR )
-                WinSendDlgItemMsg( hwnd, IDD_TITLEBAR, BM_SETCHECK, MPFROMSHORT(1), MPVOID );
-            if ( pConfig->fsStyle & APP_STYLE_WTBORDERS )
-                WinSendDlgItemMsg( hwnd, IDD_BORDERS, BM_SETCHECK, MPFROMSHORT(1), MPVOID );
-
-            WinSendDlgItemMsg( hwnd, IDD_VIEWSWITCH, SPBM_SETLIMITS, MPFROMLONG(500), MPFROMLONG(0) );
-            WinSendDlgItemMsg( hwnd, IDD_VIEWSWITCH, SPBM_SETCURRENTVALUE,
-                               MPFROMLONG(pConfig->usCompactThreshold), MPVOID );
-            WinSendDlgItemMsg( hwnd, IDD_DESCWIDTH, SPBM_SETLIMITS, MPFROMLONG(100), MPFROMLONG(0) );
-            WinSendDlgItemMsg( hwnd, IDD_DESCWIDTH, SPBM_SETCURRENTVALUE,
-                               MPFROMLONG(pConfig->bDescWidth), MPVOID );
-            WinSendDlgItemMsg( hwnd, IDD_PERCOLUMN, SPBM_SETLIMITS, MPFROMLONG(12), MPFROMLONG(0) );
-            WinSendDlgItemMsg( hwnd, IDD_PERCOLUMN, SPBM_SETCURRENTVALUE,
-                               MPFROMLONG(pConfig->usPerColumn), MPVOID );
-
-            break;
-
-
-        case WM_COMMAND:
-            switch( SHORT1FROMMP( mp1 )) {
-
-                // common buttons
-                case DID_OK:
-                    WinPostMsg( WinQueryWindow(hwnd, QW_OWNER), WM_COMMAND, mp1, mp2 );
-                    break;
-
-
-                case DID_CANCEL:
-                    WinPostMsg( WinQueryWindow(hwnd, QW_OWNER), WM_COMMAND, mp1, mp2 );
-                    break;
-
-                default: break;
-            }
-            // end of WM_COMMAND messages
-            return (MRESULT) 0;
-
-
-        default: break;
-    }
-
-    return WinDefDlgProc( hwnd, msg, mp1, mp2 );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * CfgPopulateClockList                                                      *
- *                                                                           *
- * Fill the list of currently-configured clocks.                             *
- * ------------------------------------------------------------------------- */
-void CfgPopulateClockList( HWND hwnd, PUCFGDATA pConfig )
-{
-    USHORT i;
-    UCHAR  szDesc[ LOCDESC_MAXZ ];
-    PSZ    psz;
-
-    /* This is a temporary (and crude) stopover until I can actually implement
-     * a proper city/timezone database with descriptions.
-     */
-
-    for ( i = 0; i < pConfig->usClocks; i++ ) {
-        //sprintf( szDesc, "Clock %u (", i+1 );
-        UniStrFromUcs( pConfig->uconv, szDesc, pConfig->aClockData[i].uzDesc, LOCDESC_MAXZ );
-        strncat( szDesc, " (", LOCDESC_MAXZ );
-        strncat( szDesc, pConfig->aClockData[i].szTZ, LOCDESC_MAXZ );
-        psz = strchr( szDesc, ',');
-        if ( psz ) {
-            *psz = '\0';
-            strncat( szDesc, "...", LOCDESC_MAXZ );
-        }
-        strncat( szDesc, ")", LOCDESC_MAXZ );
-        WinSendDlgItemMsg( hwnd, IDD_CLOCKLIST, LM_INSERTITEM,
-                           MPFROMSHORT(LIT_END), MPFROMP(szDesc) );
-    }
-
-}
-
-
-/* ------------------------------------------------------------------------- *
- * CfgSettingsCommon                                                         *
- *                                                                           *
- * Get configuration changes on the common settings page.                    *
- * ------------------------------------------------------------------------- */
-void CfgSettingsCommon( HWND hwnd, PUCFGDATA pConfig )
-{
-    ULONG ul;
-
-    if ( (USHORT) WinSendDlgItemMsg( hwnd, IDD_TITLEBAR, BM_QUERYCHECK, 0L, 0L ) == 1 )
-        pConfig->fsStyle |= APP_STYLE_TITLEBAR;
-    else
-        pConfig->fsStyle &= ~APP_STYLE_TITLEBAR;
-    if ( (USHORT) WinSendDlgItemMsg( hwnd, IDD_BORDERS, BM_QUERYCHECK, 0L, 0L ) == 1 )
-        pConfig->fsStyle |= APP_STYLE_WTBORDERS;
-    else
-        pConfig->fsStyle &= ~APP_STYLE_WTBORDERS;
-
-    if ( WinSendDlgItemMsg( hwnd, IDD_VIEWSWITCH, SPBM_QUERYVALUE,
-                            MPFROMP(&ul), MPFROM2SHORT(SPBQ_UPDATEIFVALID, 0)))
-        pConfig->usCompactThreshold = (USHORT) ul;
-    if ( WinSendDlgItemMsg( hwnd, IDD_DESCWIDTH, SPBM_QUERYVALUE,
-                            MPFROMP(&ul), MPFROM2SHORT(SPBQ_UPDATEIFVALID, 0)))
-        pConfig->bDescWidth = (BYTE) ul;
-    if ( WinSendDlgItemMsg( hwnd, IDD_PERCOLUMN, SPBM_QUERYVALUE,
-                            MPFROMP(&ul), MPFROM2SHORT(SPBQ_UPDATEIFVALID, 0)))
-        pConfig->usPerColumn = (USHORT) ul;
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClockNotebook                                                             *
- *                                                                           *
- * Initialize and open the clock-panel configuration notebook dialog.        *
- *                                                                           *
- * ARGUMENTS:                                                                *
- *     HWND hwnd      : HWND of the application client.                      *
- *     USHORT usNumber: Number of the clock being configured.                *
- *                                                                           *
- * RETURNS: BOOL                                                             *
- *     TRUE if the configuration was changed; FALSE if it was not changed,   *
- *     or if an error occurred.                                              *
- * ------------------------------------------------------------------------- */
-BOOL ClockNotebook( HWND hwnd, USHORT usNumber )
-{
-    UCLKPROP   props;
-    PUCLGLOBAL pGlobal;
-    PSZ        psz;
-    ULONG      rc,
-               ulid,
-               flBorders,
-               clr;
-    UCHAR      szFont[ FACESIZE + 4 ];
-    MPARAM     mp1, mp2;
-
-    pGlobal = WinQueryWindowPtr( hwnd, 0 );
-
-    memset( &props, 0, sizeof(props) );
-    props.hab = pGlobal->hab;
-    props.hmq = pGlobal->hmq;
-    props.usClock = usNumber;
-    props.bChanged = FALSE;
-
-    rc = UniCreateUconvObject( (UniChar *) L"@map=display,path=no", &(props.uconv) );
-    if ( rc != ULS_SUCCESS) props.uconv = NULL;
-
-    // Query the settings of the current clock
-    if ( ! pGlobal->clocks[usNumber] ) return FALSE;
-
-    // colours & fonts
-    if ( WinQueryPresParam( pGlobal->clocks[usNumber], PP_FOREGROUNDCOLOR,
-                            PP_FOREGROUNDCOLORINDEX, &ulid,
-                            sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-        props.clockStyle.clrFG = clr;
-    else
-        props.clockStyle.clrFG = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( pGlobal->clocks[usNumber], PP_BACKGROUNDCOLOR,
-                            PP_BACKGROUNDCOLORINDEX, &ulid,
-                            sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-        props.clockStyle.clrBG = clr;
-    else
-        props.clockStyle.clrBG = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( pGlobal->clocks[usNumber], PP_BORDERCOLOR,
-                            0, &ulid, sizeof(clr), &clr, 0 ))
-        props.clockStyle.clrBor = clr;
-    else
-        props.clockStyle.clrBor = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( pGlobal->clocks[usNumber], PP_SEPARATORCOLOR,
-                            0, &ulid, sizeof(clr), &clr, QPF_NOINHERIT ))
-        props.clockStyle.clrSep = clr;
-    else
-        props.clockStyle.clrSep = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( pGlobal->clocks[usNumber], PP_FONTNAMESIZE, 0,
-                            NULL, sizeof(szFont), szFont, QPF_NOINHERIT ))
-    {
-        psz = strchr( szFont, '.') + 1;
-        strncpy( props.clockStyle.szFont, psz, FACESIZE );
-    }
-
-    // configurable settings
-    props.clockData.cb = sizeof(WTDCDATA);
-    WinSendMsg( pGlobal->clocks[usNumber], WTD_QUERYCONFIG, MPFROMP(&(props.clockData)), MPVOID );
-
-    flBorders = props.clockData.flOptions & 0xF0;   // preserve the current border settings
-
-    // show the configuration dialog
-    WinDlgBox( HWND_DESKTOP, hwnd, (PFNWP) ClkDialogProc, 0, IDD_CONFIG, &props );
-
-    // dialog has closed, now update the settings
-    if ( props.bChanged ) {
-
-        // configuration settings
-
-        WinSendMsg( pGlobal->clocks[usNumber], WTD_SETTIMEZONE,
-                    MPFROMP(props.clockData.szTZ), MPFROMP(props.clockData.uzDesc));
-        WinSendMsg( pGlobal->clocks[usNumber], WTD_SETOPTIONS,
-                    MPFROMLONG(props.clockData.flOptions | flBorders), MPVOID );
-        WinSendMsg( pGlobal->clocks[usNumber], WTD_SETLOCALE,
-                    MPFROMP(props.clockData.szLocale), MPVOID );
-
-        mp1 = ( props.clockData.flOptions & WTF_TIME_CUSTOM ) ?
-              MPFROMP( props.clockData.uzTimeFmt ) : MPVOID;
-        mp2 = ( props.clockData.flOptions & WTF_DATE_CUSTOM ) ?
-              MPFROMP( props.clockData.uzDateFmt ) : MPVOID;
-        if ( mp1 || mp2 )
-            WinSendMsg( pGlobal->clocks[usNumber], WTD_SETFORMATS, mp1, mp2 );
-
-        // appearance settings
-
-        if ( props.clockStyle.clrFG != NO_COLOUR_PP )
-            WinSetPresParam( pGlobal->clocks[usNumber], PP_FOREGROUNDCOLOR, sizeof(ULONG), &(props.clockStyle.clrFG) );
-        if ( props.clockStyle.clrBG != NO_COLOUR_PP )
-            WinSetPresParam( pGlobal->clocks[usNumber], PP_BACKGROUNDCOLOR, sizeof(ULONG), &(props.clockStyle.clrBG) );
-        if ( props.clockStyle.clrBor != NO_COLOUR_PP )
-            WinSetPresParam( pGlobal->clocks[usNumber], PP_BORDERCOLOR, sizeof(ULONG), &(props.clockStyle.clrBor) );
-        if ( props.clockStyle.clrSep != NO_COLOUR_PP )
-            WinSetPresParam( pGlobal->clocks[usNumber], PP_SEPARATORCOLOR, sizeof(ULONG), &(props.clockStyle.clrSep) );
-        if ( props.clockStyle.szFont[0] ) {
-            sprintf( szFont, "10.%s", props.clockStyle.szFont );
-            WinSetPresParam( pGlobal->clocks[usNumber], PP_FONTNAMESIZE, strlen(szFont)+1, szFont );
-        }
-
-    }
-
-    UniFreeUconvObject( props.uconv );
-    return ( props.bChanged );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClkDialogProc                                                             *
- *                                                                           *
- * Dialog procedure for the clock properties dialog.                         *
- * ------------------------------------------------------------------------- */
-MRESULT EXPENTRY ClkDialogProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
-{
-    PUCLKPROP pConfig;
-    HPOINTER  hicon;
-    HWND      hwndPage;
-    UCHAR     szTitle[ SZRES_MAXZ ];
-
-    switch ( msg ) {
-
-        case WM_INITDLG:
-            hicon = WinLoadPointer( HWND_DESKTOP, 0, ID_MAINPROGRAM );
-            WinSendMsg( hwnd, WM_SETICON, (MPARAM) hicon, MPVOID );
-
-            pConfig = (PUCLKPROP) mp2;
-            WinSetWindowPtr( hwnd, 0, pConfig );
-
-            sprintf( szTitle, "Clock %d - Properties", pConfig->usClock+1 );     // TODO NLS
-            WinSetWindowText( hwnd, szTitle );
-
-            if ( ! ClkPopulateNotebook( hwnd, pConfig ) ) {
-                ErrorPopup("Error populating notebook.");   // TODO NLS
-                return (MRESULT) TRUE;
-            }
-            CentreWindow( hwnd );
-            return (MRESULT) FALSE;
-
-
-        case WM_COMMAND:
-            pConfig = WinQueryWindowPtr( hwnd, 0 );
-            switch( SHORT1FROMMP( mp1 )) {
-
-                case DID_OK:
-                    hwndPage = (HWND) WinSendDlgItemMsg( hwnd, IDD_CFGBOOK, BKM_QUERYPAGEWINDOWHWND, MPFROMLONG(pConfig->ulPage1), 0 );
-                    if ( hwndPage && hwndPage != BOOKERR_INVALID_PARAMETERS )
-                        ClkSettingsClock( hwndPage, pConfig );
-                    hwndPage = (HWND) WinSendDlgItemMsg( hwnd, IDD_CFGBOOK, BKM_QUERYPAGEWINDOWHWND, MPFROMLONG(pConfig->ulPage2), 0 );
-                    if ( hwndPage && hwndPage != BOOKERR_INVALID_PARAMETERS )
-                        ClkSettingsStyle( hwndPage, pConfig );
-                    pConfig->bChanged = TRUE;
-                    break;
-
-                default: break;
-            } // end WM_COMMAND messages
-            break;
-
-
-        case WM_CONTROL:
-            pConfig = WinQueryWindowPtr( hwnd, 0 );
-            switch( SHORT1FROMMP( mp1 )) {
-            } // end WM_CONTROL messages
-            break;
-
-
-        default: break;
-    }
-
-    return WinDefDlgProc( hwnd, msg, mp1, mp2 );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClkPopulateNotebook()                                                     *
- *                                                                           *
- * Creates the pages (dialogs) of the clock properties notebook.             *
- *                                                                           *
- * ARGUMENTS:                                                                *
- *     HWND hwnd         : HWND of the properties dialog.                    *
- *     PUCLKPROP pConfig: Pointer to clock properties data.                  *
- *                                                                           *
- * RETURNS: BOOL                                                             *
- *     FALSE if an error occurred.  TRUE otherwise.                          *
- * ------------------------------------------------------------------------- */
-BOOL ClkPopulateNotebook( HWND hwnd, PUCLKPROP pConfig )
-{
-    ULONG          pageId;
-    HWND           hwndPage,
-                   hwndBook;
-    NOTEBOOKBUTTON bookButtons[ 3 ];
-    USHORT         fsCommon = BKA_AUTOPAGESIZE | BKA_STATUSTEXTON;
-    CHAR           szOK[ SZRES_MAXZ ],
-                   szCancel[ SZRES_MAXZ ],
-                   szHelp[ SZRES_MAXZ ];
-
-
-    hwndBook = WinWindowFromID( hwnd, IDD_CFGBOOK );
-    if ( ! WinLoadString( pConfig->hab, 0, IDS_BTN_OK, SZRES_MAXZ-1, szOK ))
-        sprintf( szOK, "OK");
-    if ( ! WinLoadString( pConfig->hab, 0, IDS_BTN_CANCEL, SZRES_MAXZ-1, szCancel ))
-        sprintf( szOK, "Cancel");
-    if ( ! WinLoadString( pConfig->hab, 0, IDS_BTN_HELP, SZRES_MAXZ-1, szHelp ))
-        sprintf( szOK, "~Help");
-
-    // create common buttons
-    bookButtons[0].pszText  = szOK;
-    bookButtons[0].idButton = DID_OK;
-    bookButtons[0].flStyle  = BS_AUTOSIZE | BS_DEFAULT;
-    bookButtons[1].pszText  = szCancel;
-    bookButtons[1].idButton = DID_CANCEL;
-    bookButtons[1].flStyle  = BS_AUTOSIZE;
-    bookButtons[2].pszText  = szHelp;
-    bookButtons[2].idButton = DID_HELP;
-    bookButtons[2].flStyle  = BS_AUTOSIZE | BS_HELP;
-    WinSendMsg( hwndBook, BKM_SETNOTEBOOKBUTTONS, MPFROMLONG( 3 ), MPFROMP( bookButtons ));
-
-    // this should make the notebook tabs usable if the program is run on Warp 3
-    WinSendMsg( hwndBook, BKM_SETDIMENSIONS, MPFROM2SHORT( 75, 22 ), MPFROMSHORT( BKA_MAJORTAB ));
-
-    // add the clock configuration pages
-    hwndPage = WinLoadDlg( hwndBook, hwndBook, (PFNWP) ClkClockPageProc, 0, IDD_CFGCLOCKS, pConfig );
-    pageId = (ULONG) WinSendMsg( hwndBook, BKM_INSERTPAGE, NULL,
-                                 MPFROM2SHORT( fsCommon | BKA_MAJOR, BKA_FIRST ));
-    if ( !pageId ) return FALSE;
-    if ( !WinSendMsg( hwndBook, BKM_SETTABTEXT, MPFROMLONG(pageId), MPFROMP("~Clock Setup")))      // TODO NLS
-        return FALSE;
-    if ( !WinSendMsg( hwndBook, BKM_SETPAGEWINDOWHWND,
-                      MPFROMLONG( pageId ), MPFROMP( hwndPage )))
-        return FALSE;
-    pConfig->ulPage1 = pageId;
-
-    hwndPage = WinLoadDlg( hwndBook, hwndBook, (PFNWP) ClkStylePageProc, 0, IDD_CFGPRES, pConfig );
-    pageId = (ULONG) WinSendMsg( hwndBook, BKM_INSERTPAGE, NULL,
-                                 MPFROM2SHORT( fsCommon | BKA_MAJOR, BKA_LAST ));
-    if ( !pageId ) return FALSE;
-    if ( !WinSendMsg( hwndBook, BKM_SETTABTEXT, MPFROMLONG(pageId), MPFROMP("~Appearance")))      // TODO NLS
-        return FALSE;
-    if ( !WinSendMsg( hwndBook, BKM_SETPAGEWINDOWHWND,
-                      MPFROMLONG( pageId ), MPFROMP( hwndPage )))
-        return FALSE;
-    pConfig->ulPage2 = pageId;
-
-    return TRUE;
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClkClockPageProc                                                          *
- *                                                                           *
- * Dialog procedure for the clock setup configuration page.                  *
- * ------------------------------------------------------------------------- */
-MRESULT EXPENTRY ClkClockPageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
-{
-    static PUCLKPROP pConfig;
-    UniChar *puzLocales,
-            *puz;
-    HWND    hwndLB;
-    SHORT   sIdx;
-    USHORT  offset;
-    UCHAR   szLocale[ ULS_LNAMEMAX + 1 ],
-            szFormat[ STRFT_MAXZ ] = {0},
-            szName[ LOCDESC_MAXZ ] = {0},
-            szSysDef[ SZRES_MAXZ ],
-            szLocDef[ SZRES_MAXZ ],
-            szCustom[ SZRES_MAXZ ];
-
-    switch ( msg ) {
-
-        case WM_INITDLG:
-            pConfig = (PUCLKPROP) mp2;
-            if ( !pConfig ) return (MRESULT) TRUE;
-
-            puzLocales = (UniChar *) calloc( LOCALE_BUF_MAX, sizeof(UniChar) );
-            if ( puzLocales ) {
-                if ( UniQueryLocaleList( UNI_USER_LOCALES | UNI_SYSTEM_LOCALES,
-                                         puzLocales, LOCALE_BUF_MAX ) == ULS_SUCCESS )
-                {
-                    offset = 0;
-                    while ( (offset < LOCALE_BUF_MAX) && (*(puzLocales+offset)) ) {
-                        puz = puzLocales + offset;
-                        sprintf( szLocale, "%ls", puz );
-                        WinSendDlgItemMsg( hwnd, IDD_LOCALES, LM_INSERTITEM,
-                                           MPFROMSHORT(LIT_SORTASCENDING), MPFROMP(szLocale) );
-                        offset += UniStrlen( puz ) + 1;
-                    }
-                }
-                free( puzLocales );
-            }
-
-            if ( ! WinLoadString( pConfig->hab, 0, IDS_FORMAT_SYSDEF, SZRES_MAXZ-1, szSysDef ))
-                sprintf( szSysDef, "System default");
-            if ( ! WinLoadString( pConfig->hab, 0, IDS_FORMAT_LOCDEF, SZRES_MAXZ-1, szLocDef ))
-                sprintf( szLocDef, "Locale default");
-            if ( ! WinLoadString( pConfig->hab, 0, IDS_FORMAT_CUSTOM, SZRES_MAXZ-1, szCustom ))
-                sprintf( szCustom, "Custom string");
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT,  LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szSysDef) );
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT,  LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szLocDef) );
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT,  LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szCustom) );
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT2, LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szSysDef) );
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT2, LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szLocDef) );
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT2, LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szCustom) );
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT,  LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szSysDef) );
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT,  LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szLocDef) );
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT,  LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szCustom) );
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT2, LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szSysDef) );
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT2, LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szLocDef) );
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT2, LM_INSERTITEM, MPFROMSHORT(LIT_END), MPFROMP(szCustom) );
-
-            // Select the current values
-            WinSetDlgItemText( hwnd, IDD_TZDISPLAY, pConfig->clockData.szTZ );
-
-            // description field
-            // (temporary until we can implement a proper city/location database)
-            if ( pConfig->uconv &&
-                ( UniStrFromUcs( pConfig->uconv, szName,
-                                 pConfig->clockData.uzDesc, LOCDESC_MAXZ ) == ULS_SUCCESS ))
-                WinSetDlgItemText( hwnd, IDD_CITYLIST, szName );
-
-            // formatting locale
-            sIdx = (SHORT) WinSendDlgItemMsg( hwnd, IDD_LOCALES, LM_SEARCHSTRING,
-                                              MPFROM2SHORT(LSS_CASESENSITIVE,LIT_FIRST),
-                                              MPFROMP(pConfig->clockData.szLocale) );
-            if ( sIdx != LIT_ERROR )
-                WinSendDlgItemMsg( hwnd, IDD_LOCALES, LM_SELECTITEM,
-                                   MPFROMSHORT(sIdx), MPFROMSHORT(TRUE) );
-
-            // time format controls (primary)
-            if ( pConfig->uconv &&
-                ( UniStrFromUcs( pConfig->uconv, szFormat,
-                                 pConfig->clockData.uzTimeFmt, STRFT_MAXZ ) == ULS_SUCCESS ))
-                WinSetDlgItemText( hwnd, IDD_TIMESTR, szFormat );
-
-            if ( pConfig->clockData.flOptions & WTF_TIME_SYSTEM )
-                sIdx = 0;
-            else if ( pConfig->clockData.flOptions & WTF_TIME_CUSTOM )
-                sIdx = 2;
-            else sIdx = 1;
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT, LM_SELECTITEM,
-                               MPFROMSHORT(sIdx), MPFROMSHORT(TRUE) );
-
-            if ( sIdx < 2 && pConfig->clockData.flOptions & WTF_TIME_SHORT )
-                WinSendDlgItemMsg( hwnd, IDD_TIMESHORT, BM_SETCHECK, MPFROMSHORT(1), MPVOID );
-
-            // time format controls (alternate)
-            if ( pConfig->clockData.flOptions & WTF_ATIME_SYSTEM )
-                sIdx = 0;
-            else if ( pConfig->clockData.flOptions & WTF_ATIME_CUSTOM )
-                sIdx = 2;
-            else sIdx = 1;
-            WinSendDlgItemMsg( hwnd, IDD_TIMEFMT2, LM_SELECTITEM,
-                               MPFROMSHORT(sIdx), MPFROMSHORT(TRUE) );
-
-            if ( sIdx < 2 && pConfig->clockData.flOptions & WTF_ATIME_SHORT )
-                WinSendDlgItemMsg( hwnd, IDD_TIMESHORT2, BM_SETCHECK, MPFROMSHORT(1), MPVOID );
-
-            // date format controls (primary)
-            if ( pConfig->uconv &&
-                 ( UniStrFromUcs( pConfig->uconv, szFormat,
-                                  pConfig->clockData.uzDateFmt, STRFT_MAXZ ) == ULS_SUCCESS ))
-                WinSetDlgItemText( hwnd, IDD_DATESTR, szFormat );
-
-            if ( pConfig->clockData.flOptions & WTF_DATE_SYSTEM )
-                sIdx = 0;
-            else if ( pConfig->clockData.flOptions & WTF_DATE_CUSTOM )
-                sIdx = 2;
-            else sIdx = 1;
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT, LM_SELECTITEM,
-                               MPFROMSHORT(sIdx), MPFROMSHORT(TRUE) );
-
-            // date format controls (secondary)
-            if ( pConfig->clockData.flOptions & WTF_LONGDATE_SYSTEM )
-                sIdx = 0;
-            else if ( pConfig->clockData.flOptions & WTF_LONGDATE_CUSTOM )
-                sIdx = 2;
-            else sIdx = 1;
-            WinSendDlgItemMsg( hwnd, IDD_DATEFMT2, LM_SELECTITEM,
-                               MPFROMSHORT(sIdx), MPFROMSHORT(TRUE) );
-
-            return (MRESULT) FALSE;
-
-
-        case WM_COMMAND:
-            switch( SHORT1FROMMP( mp1 )) {
-
-                // common buttons
-                case DID_OK:
-                    WinPostMsg( WinQueryWindow(hwnd, QW_OWNER), WM_COMMAND, mp1, mp2 );
-                    break;
-
-                case DID_CANCEL:
-                    WinPostMsg( WinQueryWindow(hwnd, QW_OWNER), WM_COMMAND, mp1, mp2 );
-                    break;
-
-                default: break;
-            }
-            // end of WM_COMMAND messages
-            return (MRESULT) 0;
-
-
-        case WM_CONTROL:
-            switch( SHORT1FROMMP( mp1 )) {
-
-                case IDD_TIMEFMT:
-                    if ( SHORT2FROMMP(mp1) == LN_SELECT ) {
-                        hwndLB = (HWND) mp2;
-                        sIdx = (SHORT) WinSendMsg( hwndLB, LM_QUERYSELECTION, MPFROMSHORT(LIT_FIRST), 0 );
-                        WinShowWindow( WinWindowFromID(hwnd, IDD_TIMESHORT), (sIdx < 2)? TRUE: FALSE );
-                        WinShowWindow( WinWindowFromID(hwnd, IDD_TIMESTR), (sIdx == 2)? TRUE: FALSE );
-                    }
-                    break;
-
-                case IDD_TIMEFMT2:
-                    if ( SHORT2FROMMP(mp1) == LN_SELECT ) {
-                        hwndLB = (HWND) mp2;
-                        sIdx = (SHORT) WinSendMsg( hwndLB, LM_QUERYSELECTION, MPFROMSHORT(LIT_FIRST), 0 );
-                        WinShowWindow( WinWindowFromID(hwnd, IDD_TIMESHORT2), (sIdx < 2)? TRUE: FALSE );
-                        WinShowWindow( WinWindowFromID(hwnd, IDD_TIMESTR2), (sIdx == 2)? TRUE: FALSE );
-                    }
-                    break;
-
-                case IDD_DATEFMT:
-                    if ( SHORT2FROMMP(mp1) == LN_SELECT ) {
-                        hwndLB = (HWND) mp2;
-                        sIdx = (SHORT) WinSendMsg( hwndLB, LM_QUERYSELECTION, MPFROMSHORT(LIT_FIRST), 0 );
-                        WinShowWindow( WinWindowFromID(hwnd, IDD_DATESTR), (sIdx == 2)? TRUE: FALSE );
-                    }
-                    break;
-
-                case IDD_DATEFMT2:
-                    if ( SHORT2FROMMP(mp1) == LN_SELECT ) {
-                        hwndLB = (HWND) mp2;
-                        sIdx = (SHORT) WinSendMsg( hwndLB, LM_QUERYSELECTION, MPFROMSHORT(LIT_FIRST), 0 );
-                        WinShowWindow( WinWindowFromID(hwnd, IDD_DATESTR2), (sIdx == 2)? TRUE: FALSE );
-                    }
-                    break;
-
-            } // end WM_CONTROL messages
-            break;
-
-
-        default: break;
-    }
-
-    return WinDefDlgProc( hwnd, msg, mp1, mp2 );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClkStylePageProc                                                          *
- *                                                                           *
- * Dialog procedure for the clock panels appearance & pres.params page.      *
- * ------------------------------------------------------------------------- */
-MRESULT EXPENTRY ClkStylePageProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
-{
-    static PUCLKPROP pConfig;
-    UCHAR  szFontPP[ FACESIZE+4 ];
-    ULONG  clr;
-
-    switch ( msg ) {
-
-        case WM_INITDLG:
-            pConfig = (PUCLKPROP) mp2;
-            if ( !pConfig ) return (MRESULT) TRUE;
-
-            clr = pConfig->clockStyle.clrBG;
-            if ( clr == NO_COLOUR_PP ) {
-                clr = SYSCLR_WINDOW;
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_BACKGROUND),
-                                 PP_BACKGROUNDCOLORINDEX, sizeof(ULONG), &clr );
-            } else
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_BACKGROUND),
-                                 PP_BACKGROUNDCOLOR, sizeof(ULONG), &clr );
-            clr = pConfig->clockStyle.clrFG;
-            if ( clr == NO_COLOUR_PP ) {
-                clr = SYSCLR_WINDOWTEXT;
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_FOREGROUND),
-                                 PP_BACKGROUNDCOLORINDEX, sizeof(ULONG), &clr );
-            } else
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_FOREGROUND),
-                                 PP_BACKGROUNDCOLOR, sizeof(ULONG), &clr );
-            clr = pConfig->clockStyle.clrBor;
-            if ( clr == NO_COLOUR_PP ) {
-                clr = SYSCLR_WINDOWTEXT;
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_BORDER),
-                                 PP_BACKGROUNDCOLORINDEX, sizeof(ULONG), &clr );
-            } else
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_BORDER),
-                                 PP_BACKGROUNDCOLOR, sizeof(ULONG), &clr );
-            clr = pConfig->clockStyle.clrSep;
-            if ( clr == NO_COLOUR_PP ) {
-                clr = SYSCLR_WINDOWTEXT;
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_SEPARATOR),
-                                 PP_BACKGROUNDCOLORINDEX, sizeof(ULONG), &clr );
-            } else
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_SEPARATOR),
-                                 PP_BACKGROUNDCOLOR, sizeof(ULONG), &clr );
-
-            if ( pConfig->clockStyle.szFont[0] ) {
-                if ( !strncmp( pConfig->clockStyle.szFont, "WarpSans", 8 ))
-                    sprintf( szFontPP, "9.%s", pConfig->clockStyle.szFont );
-                else
-                    sprintf( szFontPP, "10.%s", pConfig->clockStyle.szFont );
-                WinSetPresParam( WinWindowFromID(hwnd, IDD_DISPLAYFONT),
-                                 PP_FONTNAMESIZE, strlen(szFontPP)+1, szFontPP );
-            }
-            return (MRESULT) FALSE;
-
-
-        case WM_COMMAND:
-            switch( SHORT1FROMMP( mp1 )) {
-
-                case IDD_DISPLAYFONT_BTN:
-                    if ( WinQueryPresParam( WinWindowFromID(hwnd, IDD_DISPLAYFONT),
-                                            PP_FONTNAMESIZE, 0, NULL,
-                                            sizeof(szFontPP), szFontPP, QPF_NOINHERIT ))
-                    {
-                        PSZ psz = strchr( szFontPP, '.') + 1;
-                        if ( SelectFont( hwnd, psz,
-                                         sizeof(szFontPP) - ( strlen(szFontPP) - strlen(psz) )))
-                        {
-                            WinSetPresParam( WinWindowFromID( hwnd, IDD_DISPLAYFONT ),
-                                             PP_FONTNAMESIZE, strlen(szFontPP)+1, szFontPP );
-                        }
-                    }
-                    break;
-
-                case IDD_BACKGROUND_BTN:
-                    SelectColour( hwnd, WinWindowFromID( hwnd, IDD_BACKGROUND ));
-                    break;
-
-                case IDD_FOREGROUND_BTN:
-                    SelectColour( hwnd, WinWindowFromID( hwnd, IDD_FOREGROUND ));
-                    break;
-
-                case IDD_BORDER_BTN:
-                    SelectColour( hwnd, WinWindowFromID( hwnd, IDD_BORDER ));
-                    break;
-
-                case IDD_SEPARATOR_BTN:
-                    SelectColour( hwnd, WinWindowFromID( hwnd, IDD_SEPARATOR ));
-                    break;
-
-                // common buttons
-                case DID_OK:
-                    WinPostMsg( WinQueryWindow(hwnd, QW_OWNER), WM_COMMAND, mp1, mp2 );
-                    break;
-
-                case DID_CANCEL:
-                    WinPostMsg( WinQueryWindow(hwnd, QW_OWNER), WM_COMMAND, mp1, mp2 );
-                    break;
-
-                default: break;
-            }
-            // end of WM_COMMAND messages
-            return (MRESULT) 0;
-
-        default: break;
-    }
-
-    return WinDefDlgProc( hwnd, msg, mp1, mp2 );
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClkSettingsClock                                                          *
- *                                                                           *
- * Get configuration changes on the clock properties page.                   *
- * ------------------------------------------------------------------------- */
-BOOL ClkSettingsClock( HWND hwnd, PUCLKPROP pConfig )
-{
-    WTDCDATA settings;                  // new settings
-    SHORT    sIdx;                      // listbox index
-    UCHAR    szDesc[ LOCDESC_MAXZ ]  = {0},
-             szTimeFmt[ STRFT_MAXZ ] = {0},
-             szDateFmt[ STRFT_MAXZ ] = {0};
-
-
-    memset( &settings, 0, sizeof(WTDCDATA) );
-    settings.cb = sizeof( WTDCDATA );
-
-    // options mask
-
-    sIdx = (SHORT) WinSendDlgItemMsg( hwnd, IDD_TIMEFMT, LM_QUERYSELECTION,
-                                      MPFROMSHORT(LIT_FIRST), 0 );
-    switch ( sIdx ) {
-        case 0:  settings.flOptions |= WTF_TIME_SYSTEM; break;
-//        case 2:  settings.flOptions |= WTF_TIME_ALT;    break;
-        case 2:  settings.flOptions |= WTF_TIME_CUSTOM; break;
-        default: break;
-    }
-    if ( sIdx < 2 && WinQueryButtonCheckstate( hwnd, IDD_TIMESHORT ))
-        settings.flOptions |= WTF_TIME_SHORT;
-
-    sIdx = (SHORT) WinSendDlgItemMsg( hwnd, IDD_DATEFMT, LM_QUERYSELECTION,
-                                      MPFROMSHORT(LIT_FIRST), 0 );
-    switch ( sIdx ) {
-        case 0:  settings.flOptions |= WTF_DATE_SYSTEM; break;
-//        case 2:  settings.flOptions |= WTF_DATE_ALT;    break;
-        case 2:  settings.flOptions |= WTF_DATE_CUSTOM; break;
-        default: break;
-    }
-
-    // save the current view mode flag
-    settings.flOptions |= ( pConfig->clockData.flOptions & 0xF );
-
-    // (the program will determine the border settings automatically;
-    // other option flags haven't been implemented yet)
-
-
-    // timezone string
-    WinQueryDlgItemText( hwnd, IDD_TZDISPLAY, TZSTR_MAXZ, settings.szTZ );
-
-    // description
-    WinQueryDlgItemText( hwnd, IDD_CITYLIST, LOCDESC_MAXZ, szDesc );
-    UniStrToUcs( pConfig->uconv, settings.uzDesc, szDesc, LOCDESC_MAXZ );
-
-    // formatting locale
-    sIdx = (SHORT) WinSendDlgItemMsg( hwnd, IDD_LOCALES, LM_QUERYSELECTION,
-                                      MPFROMSHORT(LIT_FIRST), 0 );
-    if ( sIdx != LIT_NONE )
-        WinSendDlgItemMsg( hwnd, IDD_LOCALES, LM_QUERYITEMTEXT,
-                           MPFROM2SHORT(sIdx, ULS_LNAMEMAX + 1), settings.szLocale );
-
-    // custom format strings, if applicable
-
-    if ( settings.flOptions & WTF_TIME_CUSTOM ) {
-        WinQueryDlgItemText( hwnd, IDD_TIMESTR, STRFT_MAXZ, szTimeFmt );
-        UniStrToUcs( pConfig->uconv, settings.uzTimeFmt, szTimeFmt, STRFT_MAXZ );
-    }
-    else UniStrcpy( settings.uzTimeFmt, pConfig->clockData.uzTimeFmt );
-
-    if ( settings.flOptions & WTF_DATE_CUSTOM ) {
-        WinQueryDlgItemText( hwnd, IDD_DATESTR, STRFT_MAXZ, szDateFmt );
-        UniStrToUcs( pConfig->uconv, settings.uzDateFmt, szDateFmt, STRFT_MAXZ );
-    }
-    else UniStrcpy( settings.uzDateFmt, pConfig->clockData.uzDateFmt );
-
-    memcpy( &(pConfig->clockData), &settings, sizeof(WTDCDATA) );
-    return TRUE;
-}
-
-
-/* ------------------------------------------------------------------------- *
- * ClkSettingsStyle                                                          *
- *                                                                           *
- * Get configuration changes on the clock style page.                        *
- * ------------------------------------------------------------------------- */
-BOOL ClkSettingsStyle( HWND hwnd, PUCLKPROP pConfig )
-{
-    CLKSTYLE styles;                 // new presentation parameters
-    ULONG    ulid,
-             clr;
-    UCHAR    szFont[ FACESIZE+4 ];
-    PSZ      psz;
-
-    memset( &styles, 0, sizeof(CLKSTYLE) );
-
-    // colour presentation parameters
-    if ( WinQueryPresParam( WinWindowFromID(hwnd, IDD_BACKGROUND),
-                            PP_BACKGROUNDCOLOR, PP_BACKGROUNDCOLORINDEX,
-                            &ulid, sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-        styles.clrBG = clr;
-    else
-        styles.clrBG = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( WinWindowFromID(hwnd, IDD_FOREGROUND),
-                            PP_BACKGROUNDCOLOR, PP_BACKGROUNDCOLORINDEX,
-                            &ulid, sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-        styles.clrFG = clr;
-    else
-        styles.clrFG = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( WinWindowFromID(hwnd, IDD_BORDER),
-                            PP_BACKGROUNDCOLOR, PP_BACKGROUNDCOLORINDEX,
-                            &ulid, sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-        styles.clrBor = clr;
-    else
-        styles.clrBor = NO_COLOUR_PP;
-
-    if ( WinQueryPresParam( WinWindowFromID(hwnd, IDD_SEPARATOR),
-                            PP_BACKGROUNDCOLOR, PP_BACKGROUNDCOLORINDEX,
-                            &ulid, sizeof(clr), &clr, QPF_ID2COLORINDEX ))
-        styles.clrSep = clr;
-    else
-        styles.clrSep = NO_COLOUR_PP;
-
-    // font presentation parameter
-    if ( WinQueryPresParam( WinWindowFromID(hwnd, IDD_DISPLAYFONT),
-                            PP_FONTNAMESIZE, 0, NULL,
-                            sizeof(szFont), szFont, QPF_NOINHERIT ))
-    {
-        psz = strchr( szFont, '.') + 1;
-        strncpy( styles.szFont, psz, FACESIZE );
-    }
-
-    memcpy( &(pConfig->clockStyle), &styles, sizeof(CLKSTYLE) );
-    return TRUE;
 }
 
 
@@ -2222,7 +1272,6 @@ MRESULT EXPENTRY ClrDlgProc( HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2 )
                 WinPostMsg( hwnd, WM_CLOSE, MPVOID, MPVOID );
                 break;
             }
-
             WinSetWindowULong( hwnd, QWL_USER, (ULONG) cwdata );
             cwdata->rgbold = *cwdata->rgb;
             cwdata->hwndCol = WinWindowFromID( hwnd, ID_WHEEL );
@@ -2391,7 +1440,7 @@ BOOL SelectFont( HWND hwnd, PSZ pszFace, USHORT cbBuf )
  *                                                                           *
  * Parameters:                                                               *
  *   HWND hwnd   : handle of the current window.                             *
- *   HWND hwndCtl: handle of the window whose colour is being updated.       *
+ *   HWND hwndCtl: handle of the control whose colour is being updated.      *
  *                                                                           *
  * RETURNS: BOOL                                                             *
  * ------------------------------------------------------------------------- */
@@ -2419,3 +1468,6 @@ void SelectColour( HWND hwnd, HWND hwndCtl )
     }
 
 }
+
+
+
